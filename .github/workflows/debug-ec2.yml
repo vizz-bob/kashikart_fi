@@ -1,0 +1,162 @@
+# ═══════════════════════════════════════════════════════════════
+#  KashiKart — Debug EC2 Issues
+#  EC2 IP : 13.232.38.191  |  Region: ap-south-1
+# ═══════════════════════════════════════════════════════════════
+name: Debug EC2
+
+on:
+  workflow_dispatch:
+
+env:
+  EC2_HOST: 13.232.38.191
+  EC2_USER: ubuntu
+  DEPLOY_PATH: /home/ubuntu/kashikart
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    name: Debug EC2 Deployment
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── SSH setup ────────────────────────────────────────────
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Add EC2 to known hosts
+        run: ssh-keyscan -t ed25519,rsa -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      # ── Check service status ───────────────────────────────────
+      - name: Check backend service status
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            echo "=== Backend Service Status ==="
+            sudo systemctl status kashikart-backend --no-pager || echo "Service not found"
+            echo ""
+            echo "=== Recent Backend Logs ==="
+            sudo journalctl -u kashikart-backend -n 50 --no-pager || echo "No logs found"
+          '
+
+      # ── Check if service is running ───────────────────────────
+      - name: Check if backend is listening
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            echo "=== Listening Ports ==="
+            sudo netstat -tlnp | grep 8000 || echo "Port 8000 not listening"
+            echo ""
+            echo "=== Python Processes ==="
+            ps aux | grep python | grep -v grep || echo "No python processes"
+          '
+
+      # ── Check application logs ───────────────────────────────
+      - name: Check application logs
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            echo "=== Application Logs ==="
+            if [ -f /home/ubuntu/kashikart/backend/app.log ]; then
+              tail -100 /home/ubuntu/kashikart/backend/app.log
+            else
+              echo "app.log not found"
+            fi
+            echo ""
+            echo "=== Error Logs ==="
+            if [ -f /home/ubuntu/kashikart/backend/backend.log ]; then
+              tail -100 /home/ubuntu/kashikart/backend/backend.log
+            else
+              echo "backend.log not found"
+            fi
+          '
+
+      # ── Check .env file ─────────────────────────────────────
+      - name: Check .env file
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            echo "=== .env File ==="
+            if [ -f /home/ubuntu/kashikart/.env ]; then
+              cat /home/ubuntu/kashikart/.env | sed "s/=.*/=***/"
+            else
+              echo ".env file not found"
+            fi
+          '
+
+      # ── Check Python environment ─────────────────────────────
+      - name: Check Python environment
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            echo "=== Python Version ==="
+            python3 --version || echo "Python3 not found"
+            echo ""
+            echo "=== Virtual Environment ==="
+            if [ -d /home/ubuntu/venv ]; then
+              source /home/ubuntu/venv/bin/activate
+              pip list | head -20
+            else
+              echo "Virtual environment not found at /home/ubuntu/venv"
+            fi
+          '
+
+      # ── Test backend manually ────────────────────────────────
+      - name: Test backend manually
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            echo "=== Testing Backend Manually ==="
+            cd /home/ubuntu/kashikart/backend
+            source /home/ubuntu/venv/bin/activate
+            timeout 10 python -c "
+            import sys
+            sys.path.insert(0, \".\")
+            try:
+                from app.main import app
+                print(\"✅ Main app imports successfully\")
+            except Exception as e:
+                print(f\"❌ Import failed: {e}\")
+                import traceback
+                traceback.print_exc()
+            " || echo "Import test failed"
+          '
+
+      # ── Check database connection ────────────────────────────
+      - name: Test database connection
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            echo "=== Testing Database Connection ==="
+            cd /home/ubuntu/kashikart/backend
+            source /home/ubuntu/venv/bin/activate
+            timeout 10 python -c "
+            import asyncio
+            from sqlalchemy.ext.asyncio import create_async_engine
+            import os
+            from dotenv import load_dotenv
+            load_dotenv(\"/home/ubuntu/kashikart/.env\")
+            db_url = os.getenv(\"DATABASE_URL\")
+            print(f\"Database URL: {db_url[:30]}...\")
+            async def test():
+                engine = create_async_engine(db_url)
+                async with engine.begin() as conn:
+                    await conn.execute(\"SELECT 1\")
+                print(\"✅ Database connection successful\")
+            asyncio.run(test())
+            " || echo "Database connection test failed"
+          '
+
+      # ── Check security groups ───────────────────────────────
+      - name: Check if port 8000 is accessible
+        run: |
+          echo "=== Testing Port 8000 from GitHub Actions ==="
+          timeout 5 nc -zv ${{ env.EC2_HOST }} 8000 || echo "Port 8000 not accessible from outside"
+
+      # ── Summary ────────────────────────────────────────────
+      - name: Debug Summary
+        run: |
+          echo "## Debug Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Check the logs above to identify the issue." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Common issues:" >> $GITHUB_STEP_SUMMARY
+          echo "- Backend service not running" >> $GITHUB_STEP_SUMMARY
+          echo "- Database connection failed" >> $GITHUB_STEP_SUMMARY
+          echo "- Missing dependencies" >> $GITHUB_STEP_SUMMARY
+          echo "- Port 8000 not open in security group" >> $GITHUB_STEP_SUMMARY

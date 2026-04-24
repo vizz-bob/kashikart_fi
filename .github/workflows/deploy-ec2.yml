@@ -48,7 +48,7 @@ jobs:
       # ── Write .env from secrets ───────────────────────────────
       - name: Write .env on EC2
         run: |
-          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "cat > ${{ env.DEPLOY_PATH }}/.env << 'ENVEOF'
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "cat > ${{ env.DEPLOY_PATH }}/backend/.env << 'ENVEOF'
           APP_NAME=KashiKart
           APP_VERSION=1.0.0
           ENVIRONMENT=production
@@ -70,37 +70,99 @@ jobs:
           SMTP_FROM_EMAIL=${{ secrets.SMTP_FROM_EMAIL }}
           FRONTEND_URL=http://13.232.38.191
           BACKEND_URL=http://13.232.38.191:8000
-          UPLOAD_DIR=${{ env.DEPLOY_PATH }}/uploads
-          BRANDING_UPLOAD_DIR=${{ env.DEPLOY_PATH }}/branding
+          UPLOAD_DIR=${{ env.DEPLOY_PATH }}/backend/uploads
+          BRANDING_UPLOAD_DIR=${{ env.DEPLOY_PATH }}/backend/branding
           ENVEOF"
 
       # ── Install deps & restart service ────────────────────────
-      - name: Restart backend
+      - name: Setup Python environment
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            set -e
+            # Create virtual environment if not exists
+            if [ ! -d /home/ubuntu/venv ]; then
+              python3 -m venv /home/ubuntu/venv
+            fi
+            source /home/ubuntu/venv/bin/activate
+            pip install --upgrade pip -q
+            echo "✅ Virtual environment ready"
+          '
+
+      - name: Install backend dependencies
         run: |
           ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
             set -e
             source /home/ubuntu/venv/bin/activate
-            pip install -r /home/ubuntu/kashikart/backend/requirements.txt -q
-            mkdir -p /home/ubuntu/kashikart/uploads /home/ubuntu/kashikart/branding
+            cd /home/ubuntu/kashikart/backend
+            pip install -r requirements.txt -q
+            echo "✅ Dependencies installed"
+          '
+
+      - name: Create directories
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            mkdir -p /home/ubuntu/kashikart/backend/uploads /home/ubuntu/kashikart/backend/branding
+            echo "✅ Directories created"
+          '
+
+      - name: Create systemd service
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            sudo tee /etc/systemd/system/kashikart-backend.service > /dev/null << EOF
+          [Unit]
+          Description=KashiKart Backend API
+          After=network.target
+
+          [Service]
+          Type=exec
+          User=ubuntu
+          Group=ubuntu
+          WorkingDirectory=/home/ubuntu/kashikart/backend
+          Environment=PATH=/home/ubuntu/venv/bin
+          EnvironmentFile=/home/ubuntu/kashikart/.env
+          ExecStart=/home/ubuntu/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+          Restart=always
+          RestartSec=10
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
             sudo systemctl daemon-reload
+            echo "✅ Systemd service created"
+          '
+
+      - name: Restart backend service
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
             sudo systemctl restart kashikart-backend
             sudo systemctl enable kashikart-backend
-            echo "Service restarted OK"
+            sleep 5
+            sudo systemctl status kashikart-backend --no-pager
+            echo "✅ Service restarted"
+          '
+
+      - name: Check service logs
+        if: always()
+        run: |
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            echo "=== Recent Service Logs ==="
+            sudo journalctl -u kashikart-backend -n 30 --no-pager || echo "No logs yet"
           '
 
       # ── Health check ─────────────────────────────────────────
       - name: Health check
         run: |
-          for i in $(seq 1 12); do
+          echo "Starting health checks..."
+          for i in $(seq 1 20); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://${{ env.EC2_HOST }}:8000/api/health || echo "000")
+            echo "Attempt $i/20 — HTTP $STATUS"
             if [ "$STATUS" = "200" ]; then
-              echo "Backend healthy"
+              echo "✅ Backend healthy"
               exit 0
             fi
-            echo "Attempt $i/12 — HTTP $STATUS, waiting 5s..."
-            sleep 5
+            sleep 10
           done
-          echo "Health check failed"
+          echo "❌ Health check failed after 20 attempts"
           exit 1
 
       - name: Summary
