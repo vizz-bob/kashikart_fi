@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "KashiKart Tender Intelligence — Windows Desktop App",
-  "main": "public/electron.js",
+  "main": "electron.js",
   "homepage": ".",
   "scripts": {
     "dev": "vite",
@@ -50,13 +50,13 @@
     },
     "files": [
       "dist/**/*",
-      "public/electron.js",
+      "electron.js",
       "public/preload.js",
       "public/config.json",
       "node_modules/**/*"
     ],
     "extraMetadata": {
-      "main": "public/electron.js"
+      "main": "electron.js"
     },
     "win": {
       "target": [
