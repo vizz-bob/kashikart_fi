@@ -8,6 +8,7 @@ const BACKEND_URL = 'http://13.232.38.191:8000';
 
 // Keep a global reference of the window object
 let mainWindow;
+let server = null;
 
 function createWindow() {
   // Create the browser window
@@ -33,17 +34,36 @@ function createWindow() {
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
   } else {
-    // In production, load from the dist folder
-    const distPath = path.join(__dirname, 'dist', 'index.html');
-    console.log('Loading from:', distPath);
-    console.log('__dirname:', __dirname);
-    console.log('File exists:', fs.existsSync(distPath));
+    // In production, use a simple HTTP server to serve the dist folder
+    // This is more reliable than file:// protocol
+    const express = require('express');
+    const appServer = express();
+    const distPath = path.join(__dirname, 'dist');
+    
+    console.log('Serving dist folder from:', distPath);
+    console.log('Dist exists:', fs.existsSync(distPath));
     
     if (fs.existsSync(distPath)) {
-      mainWindow.loadFile(distPath);
+      appServer.use(express.static(distPath));
+      
+      // Handle SPA routing
+      appServer.get('*', (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+      
+      server = appServer.listen(0, '127.0.0.1', () => {
+        const port = server.address().port;
+        console.log('Local server running on port:', port);
+        mainWindow.loadURL(`http://127.0.0.1:${port}`);
+      });
+      
+      server.on('error', (err) => {
+        console.error('Server error:', err);
+        mainWindow.loadURL('data:text/html,<h1>Error: Could not start local server</h1><p>Please reinstall.</p>');
+      });
     } else {
-      console.error('Could not find dist/index.html at:', distPath);
-      mainWindow.loadURL('data:text/html,<h1>Error: Could not load application</h1><p>Please reinstall.</p>');
+      console.error('Could not find dist folder at:', distPath);
+      mainWindow.loadURL('data:text/html,<h1>Error: Could not find application files</h1><p>Please reinstall.</p>');
     }
   }
 
