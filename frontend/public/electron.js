@@ -30,11 +30,33 @@ function createWindow() {
   });
 
   // Load the app
-  const startUrl = isDev
-    ? 'http://localhost:5173'
-    : `file://${path.join(__dirname, 'dist/index.html')}`;
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5173');
+  } else {
+    // In production, load from the packaged dist folder
+    // Try multiple possible paths
+    const possiblePaths = [
+      path.join(__dirname, 'dist', 'index.html'),
+      path.join(__dirname, '..', 'dist', 'index.html'),
+      path.join(process.resourcesPath, 'dist', 'index.html'),
+      path.join(app.getAppPath(), 'dist', 'index.html')
+    ];
 
-  mainWindow.loadURL(startUrl);
+    let loaded = false;
+    for (const distPath of possiblePaths) {
+      console.log('Trying path:', distPath);
+      console.log('File exists:', fs.existsSync(distPath));
+      if (fs.existsSync(distPath)) {
+        mainWindow.loadFile(distPath);
+        loaded = true;
+        break;
+      }
+    }
+
+    if (!loaded) {
+      console.error('Could not find dist/index.html in any of these paths:', possiblePaths);
+    }
+  }
 
   // Handle load errors
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
