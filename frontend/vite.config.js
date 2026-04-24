@@ -7,6 +7,7 @@ export default defineConfig({
       jsxRuntime: 'automatic'
     })
   ],
+  base: './', // Use relative paths for Electron
   server: {
     port: 5173,
     host: true,
