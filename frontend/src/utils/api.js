@@ -1,5 +1,9 @@
 export const DEFAULT_TIMEOUT_MS = 60000;
 
+// In Electron, relative URLs resolve to the local file server, not EC2.
+// Always use the absolute backend URL for all API calls.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://13.232.38.191:8000";
+
 const AUTH_TOKEN_KEYS = ["kashikart_token", "access_token"];
 let hasTriggeredAuthRedirect = false;
 
@@ -59,8 +63,11 @@ export async function requestJson(url, options = {}) {
     mergedHeaders["Authorization"] = `Bearer ${token}`;
   }
 
+  // Resolve relative URLs against the backend base
+  const fullUrl = url.startsWith("/") ? `${API_BASE}${url}` : url;
+
   try {
-    const response = await fetch(url, { ...rest, headers: mergedHeaders, signal: controller.signal });
+    const response = await fetch(fullUrl, { ...rest, headers: mergedHeaders, signal: controller.signal });
     const contentType = response.headers.get("content-type") || "";
     const data = contentType.includes("application/json")
       ? await response.json()
