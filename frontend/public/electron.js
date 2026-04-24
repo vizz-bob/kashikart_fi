@@ -1,6 +1,9 @@
-const { app, BrowserWindow, Menu, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
 const isDev = process.env.NODE_ENV === 'development';
+
+// ── Production EC2 backend ──────────────────────────────────────────────────
+const BACKEND_URL = 'http://13.232.38.191:8000';
 
 // Keep a global reference of the window object
 let mainWindow;
@@ -113,13 +116,24 @@ function createMenu() {
         {
           label: 'About KashiKart',
           click: () => {
-            shell.openExternal('https://your-domain.com');
+            dialog.showMessageBox(mainWindow, {
+              type: 'info',
+              title: 'About KashiKart',
+              message: 'KashiKart Tender Intelligence',
+              detail: `Version: ${app.getVersion()}\nBackend: ${BACKEND_URL}`,
+            });
           }
         },
         {
-          label: 'Documentation',
+          label: 'API Documentation',
           click: () => {
-            shell.openExternal('https://your-domain.com/docs');
+            shell.openExternal(`${BACKEND_URL}/docs`);
+          }
+        },
+        {
+          label: 'Backend Health',
+          click: () => {
+            shell.openExternal(`${BACKEND_URL}/api/health`);
           }
         }
       ]
@@ -179,18 +193,5 @@ ipcMain.handle('platform', () => {
   return process.platform;
 });
 
-// Auto-updater (for production)
-if (!isDev) {
-  const { autoUpdater } = require('electron-updater');
-  
-  autoUpdater.checkForUpdatesAndNotify();
-  
-  autoUpdater.on('update-available', () => {
-    console.log('Update available');
-  });
-  
-  autoUpdater.on('update-downloaded', () => {
-    console.log('Update downloaded');
-    autoUpdater.quitAndInstall();
-  });
-}
+// Expose backend URL to renderer process
+ipcMain.handle('get-backend-url', () => BACKEND_URL);

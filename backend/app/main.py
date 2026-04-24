@@ -78,13 +78,21 @@ app = FastAPI(
 )
 
 # CORS Configuration
+# Includes localhost (dev), EC2 public IP, and Electron (file://)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        # Local development
         "http://localhost:3000",
         "http://localhost:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:5173",
+        # EC2 production IP
+        "http://13.232.38.191",
+        "http://13.232.38.191:8000",
+        # Electron desktop app (file:// origin)
+        "file://",
+        "null",
     ],
     allow_credentials=True,
     allow_methods=["*"],

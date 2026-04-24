@@ -1,181 +1,176 @@
+# ═══════════════════════════════════════════════════════════════
+#  KashiKart — Build Windows .exe (Electron)
+#  Triggers: push a version tag like v1.0.0  OR  run manually
+#  Output  : KashiKart-Setup-x.x.x.exe uploaded to:
+#            - GitHub Release assets
+#            - S3: kashikart-tender-data/exe/latest/
+# ═══════════════════════════════════════════════════════════════
+
 name: Build Windows .exe
 
 on:
   push:
-    tags: [ 'v*.*.*' ]
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version number (e.g., 1.0.0)'
+        description: 'Version tag (e.g. v1.0.0)'
         required: true
-        default: '1.0.0'
+        default: 'v1.0.0'
+
+env:
+  AWS_REGION: ap-south-1
+  S3_BUCKET: kashikart-tender-data
 
 jobs:
   build-exe:
     runs-on: windows-latest
-    name: Build Windows Executable
-    
+    name: Build & Package Windows Installer
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
+      # ── Checkout ────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
+      # ── Node.js ─────────────────────────────────────────────
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
 
-    - name: Install frontend dependencies
-      run: |
-        cd frontend
-        npm ci
+      # ── Install dependencies ─────────────────────────────────
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
 
-    - name: Install Electron dependencies
-      run: |
-        cd frontend
-        npm install --save-dev electron electron-builder concurrently wait-on
+      # ── Resolve version ──────────────────────────────────────
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            V="${{ github.ref_name }}"
+          fi
+          # Strip leading 'v' for npm version field
+          SEMVER="${V#v}"
+          echo "tag=$V" >> $GITHUB_OUTPUT
+          echo "semver=$SEMVER" >> $GITHUB_OUTPUT
+          echo "Building version: $V ($SEMVER)"
 
-    - name: Update package.json for Electron
-      run: |
-        cd frontend
-        
-        # Set main and homepage
-        npm pkg set main="public/electron.js"
-        npm pkg set homepage="."
-        
-        # Add Electron scripts
-        npm pkg set scripts.electron="electron ."
-        npm pkg set scripts.electron-dev="concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\""
-        npm pkg set scripts.electron-pack="electron-builder"
-        npm pkg set scripts.preelectron-pack="npm run build"
-        
-        # Configure electron-builder
-        npm pkg set build.appId="com.kashikart.tender"
-        npm pkg set build.productName="KashiKart Tender Intelligence"
-        npm pkg set build.directories.output="dist-electron"
-        npm pkg set build.files[0]="dist/**/*"
-        npm pkg set build.files[1]="node_modules/**/*"
-        npm pkg set build.files[2]="public/electron.js"
-        npm pkg set build.files[3]="public/preload.js"
-        
-        # Windows configuration
-        npm pkg set build.win.target="nsis"
-        npm pkg set build.win.icon="public/icon.ico"
-        npm pkg set build.win.publisherName="KashiKart"
-        
-        # NSIS configuration
-        npm pkg set build.nsis.oneClick=false
-        npm pkg set build.nsis.allowToChangeInstallationDirectory=true
-        npm pkg set build.nsis.createDesktopShortcut=true
-        npm pkg set build.nsis.createStartMenuShortcut=true
-        npm pkg set build.nsis.perMachine=true
-        
-        # Publish configuration
-        npm pkg set build.publish.provider="github"
-        npm pkg set build.publish.owner="vizz-bob"
-        npm pkg set build.publish.repo="kashikart_fi"
+      # ── Stamp version into package.json ──────────────────────
+      - name: Set version in package.json
+        working-directory: frontend
+        run: npm version ${{ steps.version.outputs.semver }} --no-git-tag-version --allow-same-version
 
-    - name: Create application icon
-      run: |
-        cd frontend/public
-        
-        # Create a simple icon file (you should replace this with your actual icon)
-        # This is a placeholder - you should add your actual icon.ico to the repository
-        echo "Icon file should be added here" > icon.txt
+      # ── Write .env.production so Vite bakes in the EC2 URL ──
+      - name: Write .env.production
+        working-directory: frontend
+        run: |
+          echo "VITE_API_BASE_URL=http://13.232.38.191:8000" > .env.production
 
-    - name: Build frontend
-      run: |
-        cd frontend
-        npm run build
+      # ── Build React app (Vite) ───────────────────────────────
+      - name: Build frontend (Vite)
+        working-directory: frontend
+        run: npm run build
 
-    - name: Build Windows .exe
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        cd frontend
-        npm run electron-pack
+      # ── Build Windows installer (Electron Builder) ───────────
+      - name: Build Windows .exe
+        working-directory: frontend
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Disable code-signing (add cert secrets later if needed)
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npx electron-builder --win --x64
 
-    - name: List built files
-      run: |
-        cd frontend
-        echo "Built files:"
-        ls -la dist-electron/
+      # ── List artifacts ───────────────────────────────────────
+      - name: List built installer files
+        shell: bash
+        run: |
+          echo "--- dist-electron contents ---"
+          ls -lh frontend/dist-electron/ || true
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: kashikart-installer
-        path: frontend/dist-electron/*.exe
-        retention-days: 30
+      # ── Upload to GitHub Actions artifacts ───────────────────
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KashiKart-Windows-Installer-${{ steps.version.outputs.tag }}
+          path: frontend/dist-electron/*.exe
+          retention-days: 30
 
-    - name: Upload to S3
-      if: startsWith(github.ref, 'refs/tags/')
-      env:
-        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        AWS_REGION: us-east-1
-      run: |
-        aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
-        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
-        aws configure set default.region $AWS_REGION
-        
-        # Get version from tag or input
-        VERSION=${{ github.ref_name }}
-        if [[ $VERSION == refs/tags/* ]]; then
-          VERSION=${VERSION#refs/tags/}
-        else
-          VERSION=${{ github.event.inputs.version }}
-        fi
-        
-        # Upload to S3
-        aws s3 sync frontend/dist-electron/ s3://${{ secrets.S3_BUCKET_NAME }}/exe/v$VERSION/ --delete
-        
-        # Update latest version
-        aws s3 sync frontend/dist-electron/ s3://${{ secrets.S3_BUCKET_NAME }}/exe/latest/ --delete
-        
-        echo "✅ Uploaded to S3: s3://${{ secrets.S3_BUCKET_NAME }}/exe/v$VERSION/"
+      # ── Upload to S3 ─────────────────────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: Create Release
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v2
-      with:
-        files: frontend/dist-electron/*.exe
-        draft: false
-        prerelease: false
-        generate_release_notes: true
-        name: KashiKart v${{ github.ref_name }}
-        body: |
-          ## KashiKart Tender Intelligence v${{ github.ref_name }}
-          
-          ### 🚀 What's New
-          - Latest features and improvements
-          - Bug fixes and performance enhancements
-          
-          ### 📦 Installation
-          1. Download `KashiKart-Setup-${{ github.ref_name }}.exe` from the assets below
-          2. Run the installer
-          3. Follow the installation wizard
-          4. Launch KashiKart from your desktop or Start menu
-          
-          ### 🔗 Links
-          - **Web Application:** https://${{ secrets.DOMAIN_NAME }}
-          - **API Documentation:** https://${{ secrets.DOMAIN_NAME }}/docs
-          - **Support:** Contact support@kashikart.com
-          
-          ### 📋 System Requirements
-          - Windows 10 or later
-          - 4GB RAM minimum
-          - 500MB disk space
-          - Internet connection for full functionality
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload .exe to S3
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          # Upload to versioned path
+          aws s3 sync frontend/dist-electron/ \
+            s3://${{ env.S3_BUCKET }}/exe/$VERSION/ \
+            --exclude "*" --include "*.exe" \
+            --region ${{ env.AWS_REGION }}
 
-    - name: Notify about new release
-      if: startsWith(github.ref, 'refs/tags/')
-      run: |
-        VERSION=${{ github.ref_name }}
-        curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-          -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-          -d text="🎉 New KashiKart release available! v$VERSION\n\n📥 Download: https://github.com/${{ github.repository }}/releases/latest\n🌐 Web App: https://${{ secrets.DOMAIN_NAME }}" \
-          2>/dev/null || echo "Telegram notification failed"
+          # Also update /latest/
+          aws s3 sync frontend/dist-electron/ \
+            s3://${{ env.S3_BUCKET }}/exe/latest/ \
+            --exclude "*" --include "*.exe" \
+            --delete \
+            --region ${{ env.AWS_REGION }}
+
+          echo "Uploaded to s3://${{ env.S3_BUCKET }}/exe/$VERSION/"
+          echo "Also updated s3://${{ env.S3_BUCKET }}/exe/latest/"
+
+      # ── Create GitHub Release ────────────────────────────────
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: KashiKart Tender Intelligence ${{ steps.version.outputs.tag }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: frontend/dist-electron/*.exe
+          body: |
+            ## KashiKart Tender Intelligence ${{ steps.version.outputs.tag }}
+
+            ### How to install on Windows
+            1. Download **KashiKart-Setup-${{ steps.version.outputs.semver }}.exe** from the assets below
+            2. Double-click to run the installer
+            3. Follow the setup wizard (choose install folder)
+            4. Launch from Desktop shortcut or Start Menu
+
+            ### What this app connects to
+            - **Backend API:** http://13.232.38.191:8000
+            - **S3 Bucket:** kashikart-tender-data (ap-south-1)
+
+            ### System Requirements
+            - Windows 10 / 11 (64-bit)
+            - 4 GB RAM minimum
+            - 500 MB free disk space
+            - Internet connection required
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Summary ──────────────────────────────────────────────
+      - name: Build summary
+        if: success()
+        shell: bash
+        run: |
+          echo "## Windows .exe Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.version.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "**S3 path:** s3://${{ env.S3_BUCKET }}/exe/${{ steps.version.outputs.tag }}/" >> $GITHUB_STEP_SUMMARY
+          echo "**S3 latest:** s3://${{ env.S3_BUCKET }}/exe/latest/" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download the installer from the Release assets or from S3." >> $GITHUB_STEP_SUMMARY
