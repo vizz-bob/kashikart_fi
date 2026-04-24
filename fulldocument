@@ -1,0 +1,309 @@
+KashiKartCiCd Deployment Guide (AWS EC2 + Aurora + Local Frontend)
+1️⃣ Prerequisites
+
+On AWS EC2 (Ubuntu 22.04, t3.micro or similar):
+
+Python 3.10+
+PostgreSQL/Aurora RDS
+Node.js & npm (if building frontend on server)
+Git
+pip packages in a virtual environment
+
+On Local Mac:
+
+Node.js & npm
+Git
+Access to AWS EC2 (via key pair)
+Frontend code
+2️⃣ Project Structure
+KashiKartCiCd/
+│
+├─ backend/
+│  ├─ app/
+│  │  ├─ main.py
+│  │  ├─ core/
+│  │  │  ├─ config.py
+│  │  │  └─ database.py
+│  │  └─ ...
+│  ├─ .venv/
+│  ├─ requirements.txt
+│  └─ start-backend.sh
+│
+├─ frontend/
+│  ├─ src/
+│  ├─ public/
+│  ├─ package.json
+│  ├─ vite.config.js
+│  └─ .env
+│
+└─ README.md
+3️⃣ Backend Setup
+3.1 Create virtual environment & install dependencies
+cd ~/KashiKartCiCd/backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+3.2 Backend .env
+
+Create /backend/.env:
+
+DATABASE_URL=postgresql://Stagging_Admin:YourPassword@staggin>
+SECRET_KEY=a9a84d50e77b3fa27c69b4737373f436219b3d3b8e4e8b4616
+ENCRYPTION_KEY=replace_with_a_secret_key
+SMTP_USER=test@example.com
+SMTP_PASSWORD=testpassword
+SMTP_FROM_EMAIL=test@example.com
+DEBUG=False
+
+Replace <RDS_ENDPOINT> with your Aurora endpoint (from AWS RDS dashboard).
+
+3.3 Backend systemd service
+
+Create /etc/systemd/system/kashikart-backend.service:
+
+[Unit]
+Description=KashiKart FastAPI backend
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/KashiKartCiCd/backend
+Environment="PATH=/home/ubuntu/KashiKartCiCd/backend/.venv/bin"
+ExecStart=/home/ubuntu/KashiKartCiCd/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+
+Enable & start service:
+
+sudo systemctl daemon-reload
+sudo systemctl start kashikart-backend.service
+sudo systemctl enable kashikart-backend.service
+sudo systemctl status kashikart-backend.service
+
+✅ Should show: Active: active (running)
+
+4️⃣ Frontend Setup
+4.1 Frontend .env
+
+On your Mac, inside /frontend:
+
+VITE_API_BASE_URL=http://<EC2_PUBLIC_IP>:8000
+
+Replace <EC2_PUBLIC_IP> with the current public IP of your EC2 instance.
+
+Optional: Use a shell script to automatically fetch the EC2 IP if you restart the server:
+
+#!/bin/bash
+# start-frontend.sh
+EC2_IP=<EC2_PUBLIC_IP>
+echo "VITE_API_BASE_URL=http://$EC2_IP:8000" > .env
+npm run dev
+4.2 Start frontend in background (Mac)
+
+Use nohup or pm2 to run without blocking terminal:
+
+# install pm2 if needed
+npm install -g pm2
+
+# start frontend
+pm2 start npm --name frontend -- run dev
+pm2 save  # keep it running after Mac restart
+5️⃣ Backend Logs & Monitoring
+Logs: sudo journalctl -u kashikart-backend.service -f
+Restart service: sudo systemctl restart kashikart-backend.service
+Enable at boot: sudo systemctl enable kashikart-backend.service
+6️⃣ Notes for EC2 IP Changes
+If you don’t want Elastic IP, after each restart of EC2, update .env in frontend:
+VITE_API_BASE_URL=http://<NEW_EC2_IP>:8000
+You can automate with a small shell script or pm2 ecosystem file.
+7️⃣ Frontend ↔ Backend Connection
+The only connection is via .env:
+VITE_API_BASE_URL=http://<EC2_IP>:8000
+All API calls in frontend use import.meta.env.VITE_API_BASE_URL.
+8️⃣ Optional: Keep Scripts in Project Root
+
+start-backend.sh (in root KashiKartCiCd):
+
+#!/bin/bash
+cd backend
+source .venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+start-frontend.sh (in root KashiKartCiCd):
+
+#!/bin/bash
+cd frontend
+# Update API_BASE_URL with current EC2 IP
+EC2_IP=<EC2_PUBLIC_IP>
+echo "VITE_API_BASE_URL=http://$EC2_IP:8000" > .env
+npm run dev
+
+Make them executable:
+
+chmod +x start-backend.sh start-frontend.sh
+
+Now you can run:
+
+./start-backend.sh  # on EC2
+./start-frontend.sh # on Mac
+9️⃣ GitHub Structure
+
+Commit the following:
+
+KashiKartCiCd/
+│
+├─ backend/
+│  ├─ app/
+│  ├─ requirements.txt
+│  └─ start-backend.sh
+│
+├─ frontend/
+│  ├─ src/
+│  ├─ package.json
+│  ├─ vite.config.js
+│  └─ .env.example
+│
+├─ start-frontend.sh
+└─ README.md
+
+Keep backend on EC2 with systemd auto-start.
+Keep frontend on Mac connecting to EC2 backend via IP.
+Restart EC2 without manually keeping uvicorn running.
+Restart Mac without losing frontend (using pm2).
+
+
+1️⃣ Backend .env.example
+
+Create /backend/.env.example (do not commit real passwords)
+# Database
+DATABASE_URL=postgresql+asyncpg://<DB_USER>:<DB_PASSWORD>@<RDS_ENDPOINT>:5432/<DB_NAME>
+
+# App
+ENVIRONMENT=development
+SECRET_KEY=<YOUR_SECRET_KEY>
+
+Replace placeholders when deploying:
+<DB_USER> = Kashikart
+<DB_PASSWORD> = Kashikart1234
+<RDS_ENDPOINT> = your Aurora RDS endpoint
+<DB_NAME> = Kashikart
+
+2️⃣ Frontend .env.example
+
+Create /frontend/.env.example:
+
+VITE_API_BASE_URL=http://<EC2_PUBLIC_IP>:8000
+
+Replace <EC2_PUBLIC_IP> with your AWS EC2 public IP.
+
+All frontend API calls will use:
+
+import.meta.env.VITE_API_BASE_URL
+3️⃣ start-backend.sh (root of project or backend folder)
+#!/bin/bash
+# Navigate to backend folder
+cd backend || exit
+
+# Activate virtual environment
+source .venv/bin/activate
+
+# Start FastAPI with uvicorn
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+Make it executable:
+
+chmod +x start-backend.sh
+
+This script can also be used inside systemd if needed.
+
+4️⃣ Backend systemd service
+
+File: /etc/systemd/system/kashikart-backend.service
+
+[Unit]
+Description=KashiKart FastAPI backend
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/KashiKartCiCd/backend
+Environment="PATH=/home/ubuntu/KashiKartCiCd/backend/.venv/bin"
+ExecStart=/home/ubuntu/KashiKartCiCd/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+
+Enable & start:
+
+sudo systemctl daemon-reload
+sudo systemctl start kashikart-backend.service
+sudo systemctl enable kashikart-backend.service
+sudo systemctl status kashikart-backend.service
+5️⃣ start-frontend.sh (root of project or frontend folder)
+#!/bin/bash
+# Navigate to frontend folder
+cd frontend || exit
+
+# Automatically update .env with current EC2 IP
+EC2_IP=<EC2_PUBLIC_IP>  # Update this whenever EC2 IP changes
+echo "VITE_API_BASE_URL=http://$EC2_IP:8000" > .env
+
+# Start frontend in dev mode
+npm run dev
+
+Make it executable:
+
+chmod +x start-frontend.sh
+
+Optional background run using pm2 (Mac):
+
+npm install -g pm2
+pm2 start ./start-frontend.sh --name frontend
+pm2 save
+6️⃣ Frontend ↔ Backend Connection
+.env in frontend defines the API base URL.
+Example in Vue/React:
+fetch(`${import.meta.env.VITE_API_BASE_URL}/api/items`)
+
+Only .env defines the connection between frontend and backend.
+
+7️⃣ GitHub Repository Structure
+KashiKartCiCd/
+│
+├─ backend/
+│  ├─ app/
+│  ├─ .venv/                 # optional, usually ignored in git
+│  ├─ requirements.txt
+│  ├─ start-backend.sh
+│  └─ .env.example
+│
+├─ frontend/
+│  ├─ src/
+│  ├─ package.json
+│  ├─ vite.config.js
+│  ├─ start-frontend.sh
+│  └─ .env.example
+│
+└─ README.md
+
+Important: Do not commit .env or .venv to GitHub. Commit .env.example only.
+
+✅ 8️⃣ Usage
+
+Backend (AWS EC2):
+
+cd ~/KashiKartCiCd
+sudo systemctl start kashikart-backend.service
+# OR
+./start-backend.sh
+
+Frontend (Local Mac):
+
+cd ~/KashiKartCiCd
+./start-frontend.sh
+# OR run in background with pm2
+pm2 start ./start-frontend.sh --name frontend
+pm2 save

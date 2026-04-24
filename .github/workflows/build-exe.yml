@@ -1,0 +1,181 @@
+name: Build Windows .exe
+
+on:
+  push:
+    tags: [ 'v*.*.*' ]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.0.0)'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  build-exe:
+    runs-on: windows-latest
+    name: Build Windows Executable
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install frontend dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: Install Electron dependencies
+      run: |
+        cd frontend
+        npm install --save-dev electron electron-builder concurrently wait-on
+
+    - name: Update package.json for Electron
+      run: |
+        cd frontend
+        
+        # Set main and homepage
+        npm pkg set main="public/electron.js"
+        npm pkg set homepage="."
+        
+        # Add Electron scripts
+        npm pkg set scripts.electron="electron ."
+        npm pkg set scripts.electron-dev="concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\""
+        npm pkg set scripts.electron-pack="electron-builder"
+        npm pkg set scripts.preelectron-pack="npm run build"
+        
+        # Configure electron-builder
+        npm pkg set build.appId="com.kashikart.tender"
+        npm pkg set build.productName="KashiKart Tender Intelligence"
+        npm pkg set build.directories.output="dist-electron"
+        npm pkg set build.files[0]="dist/**/*"
+        npm pkg set build.files[1]="node_modules/**/*"
+        npm pkg set build.files[2]="public/electron.js"
+        npm pkg set build.files[3]="public/preload.js"
+        
+        # Windows configuration
+        npm pkg set build.win.target="nsis"
+        npm pkg set build.win.icon="public/icon.ico"
+        npm pkg set build.win.publisherName="KashiKart"
+        
+        # NSIS configuration
+        npm pkg set build.nsis.oneClick=false
+        npm pkg set build.nsis.allowToChangeInstallationDirectory=true
+        npm pkg set build.nsis.createDesktopShortcut=true
+        npm pkg set build.nsis.createStartMenuShortcut=true
+        npm pkg set build.nsis.perMachine=true
+        
+        # Publish configuration
+        npm pkg set build.publish.provider="github"
+        npm pkg set build.publish.owner="vizz-bob"
+        npm pkg set build.publish.repo="kashikart_fi"
+
+    - name: Create application icon
+      run: |
+        cd frontend/public
+        
+        # Create a simple icon file (you should replace this with your actual icon)
+        # This is a placeholder - you should add your actual icon.ico to the repository
+        echo "Icon file should be added here" > icon.txt
+
+    - name: Build frontend
+      run: |
+        cd frontend
+        npm run build
+
+    - name: Build Windows .exe
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        cd frontend
+        npm run electron-pack
+
+    - name: List built files
+      run: |
+        cd frontend
+        echo "Built files:"
+        ls -la dist-electron/
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: kashikart-installer
+        path: frontend/dist-electron/*.exe
+        retention-days: 30
+
+    - name: Upload to S3
+      if: startsWith(github.ref, 'refs/tags/')
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_REGION: us-east-1
+      run: |
+        aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+        aws configure set default.region $AWS_REGION
+        
+        # Get version from tag or input
+        VERSION=${{ github.ref_name }}
+        if [[ $VERSION == refs/tags/* ]]; then
+          VERSION=${VERSION#refs/tags/}
+        else
+          VERSION=${{ github.event.inputs.version }}
+        fi
+        
+        # Upload to S3
+        aws s3 sync frontend/dist-electron/ s3://${{ secrets.S3_BUCKET_NAME }}/exe/v$VERSION/ --delete
+        
+        # Update latest version
+        aws s3 sync frontend/dist-electron/ s3://${{ secrets.S3_BUCKET_NAME }}/exe/latest/ --delete
+        
+        echo "✅ Uploaded to S3: s3://${{ secrets.S3_BUCKET_NAME }}/exe/v$VERSION/"
+
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: frontend/dist-electron/*.exe
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        name: KashiKart v${{ github.ref_name }}
+        body: |
+          ## KashiKart Tender Intelligence v${{ github.ref_name }}
+          
+          ### 🚀 What's New
+          - Latest features and improvements
+          - Bug fixes and performance enhancements
+          
+          ### 📦 Installation
+          1. Download `KashiKart-Setup-${{ github.ref_name }}.exe` from the assets below
+          2. Run the installer
+          3. Follow the installation wizard
+          4. Launch KashiKart from your desktop or Start menu
+          
+          ### 🔗 Links
+          - **Web Application:** https://${{ secrets.DOMAIN_NAME }}
+          - **API Documentation:** https://${{ secrets.DOMAIN_NAME }}/docs
+          - **Support:** Contact support@kashikart.com
+          
+          ### 📋 System Requirements
+          - Windows 10 or later
+          - 4GB RAM minimum
+          - 500MB disk space
+          - Internet connection for full functionality
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Notify about new release
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        VERSION=${{ github.ref_name }}
+        curl -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+          -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+          -d text="🎉 New KashiKart release available! v$VERSION\n\n📥 Download: https://github.com/${{ github.repository }}/releases/latest\n🌐 Web App: https://${{ secrets.DOMAIN_NAME }}" \
+          2>/dev/null || echo "Telegram notification failed"

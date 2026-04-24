@@ -1,0 +1,44 @@
+[Unit]
+Description=KashiKart Backend API
+Documentation=https://github.com/your-repo/KashiKart
+After=network.target
+Wants=network.target
+
+[Service]
+Type=exec
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/KashiKart-Fi/backend
+Environment=PATH=/home/ubuntu/KashiKart-Fi/backend/venv/bin
+EnvironmentFile=/home/ubuntu/KashiKart-Fi/.env
+
+# Main process
+ExecStart=/home/ubuntu/KashiKart-Fi/backend/venv/bin/gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --access-logfile - --error-logfile -
+
+# Reload configuration
+ExecReload=/bin/kill -s HUP $MAINPID
+
+# Restart policy
+Restart=always
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/ubuntu/KashiKart-Fi/backend/logs /tmp
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kashikart-backend
+
+[Install]
+WantedBy=multi-user.target
