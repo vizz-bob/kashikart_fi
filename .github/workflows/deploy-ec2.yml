@@ -119,8 +119,9 @@ jobs:
           Group=ubuntu
           WorkingDirectory=/home/ubuntu/kashikart/backend
           Environment=PATH=/home/ubuntu/venv/bin
-          EnvironmentFile=/home/ubuntu/kashikart/.env
-          ExecStart=/home/ubuntu/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+          ExecStart=/home/ubuntu/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info
+          StandardOutput=journal
+          StandardError=journal
           Restart=always
           RestartSec=10
 
