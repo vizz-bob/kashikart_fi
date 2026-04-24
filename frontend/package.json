@@ -45,7 +45,8 @@
     "productName": "KashiKart Tender Intelligence",
     "copyright": "Copyright 2025 KashiKart",
     "directories": {
-      "output": "dist-electron"
+      "output": "dist-electron",
+      "buildResources": "public"
     },
     "files": [
       "dist/**/*",
@@ -54,12 +55,9 @@
       "public/config.json",
       "node_modules/**/*"
     ],
-    "extraResources": [
-      {
-        "from": "dist",
-        "to": "dist"
-      }
-    ],
+    "extraMetadata": {
+      "main": "public/electron.js"
+    },
     "win": {
       "target": [
         {

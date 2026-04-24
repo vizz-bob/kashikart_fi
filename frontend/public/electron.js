@@ -34,27 +34,27 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5173');
   } else {
     // In production, load from the packaged dist folder
-    // Try multiple possible paths
-    const possiblePaths = [
-      path.join(__dirname, 'dist', 'index.html'),
-      path.join(__dirname, '..', 'dist', 'index.html'),
-      path.join(process.resourcesPath, 'dist', 'index.html'),
-      path.join(app.getAppPath(), 'dist', 'index.html')
-    ];
+    // The dist folder should be in the same directory as electron.js
+    const distPath = path.join(__dirname, 'dist', 'index.html');
+    console.log('Loading from:', distPath);
+    console.log('__dirname:', __dirname);
+    console.log('app.getAppPath():', app.getAppPath());
+    console.log('File exists:', fs.existsSync(distPath));
 
-    let loaded = false;
-    for (const distPath of possiblePaths) {
-      console.log('Trying path:', distPath);
-      console.log('File exists:', fs.existsSync(distPath));
-      if (fs.existsSync(distPath)) {
-        mainWindow.loadFile(distPath);
-        loaded = true;
-        break;
+    if (fs.existsSync(distPath)) {
+      mainWindow.loadFile(distPath);
+    } else {
+      // Fallback: try loading from app.asar
+      const asarPath = path.join(process.resourcesPath, 'app.asar', 'dist', 'index.html');
+      console.log('Trying asar path:', asarPath);
+      console.log('Asar file exists:', fs.existsSync(asarPath));
+      if (fs.existsSync(asarPath)) {
+        mainWindow.loadFile(asarPath);
+      } else {
+        console.error('Could not find index.html. Paths tried:', distPath, asarPath);
+        // Show error to user
+        mainWindow.loadURL('data:text/html,<h1>Error: Could not load application files</h1><p>Please reinstall the application.</p>');
       }
-    }
-
-    if (!loaded) {
-      console.error('Could not find dist/index.html in any of these paths:', possiblePaths);
     }
   }
 
