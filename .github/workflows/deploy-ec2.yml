@@ -85,6 +85,12 @@ jobs:
             cd /home/ubuntu/kashikart/backend
             pip install -r requirements.txt -q
             mkdir -p /home/ubuntu/kashikart/backend/uploads /home/ubuntu/kashikart/backend/branding
+            # Ensure RDS SSL cert is present
+            if [ ! -f /home/ubuntu/kashikart/backend/global-bundle.pem ]; then
+              curl -sf -o /home/ubuntu/kashikart/backend/global-bundle.pem \
+                https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem
+              echo "SSL cert downloaded"
+            fi
             echo "Dependencies installed"
           '
 
