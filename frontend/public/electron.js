@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu, ipcMain, shell, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const isDev = process.env.NODE_ENV === 'development';
 
 // ── Production EC2 backend ──────────────────────────────────────────────────
@@ -58,6 +59,20 @@ function createWindow() {
 
   // Create application menu
   createMenu();
+  
+  // Inject API URL configuration
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (!isDev) {
+      const configPath = path.join(path.dirname(__dirname), 'config.json');
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        mainWindow.webContents.executeJavaScript(`
+          window.__API_BASE_URL__ = '${config.apiBaseUrl}';
+          window.__APP_VERSION__ = '${config.appVersion}';
+        `);
+      }
+    }
+  });
 }
 
 function createMenu() {
