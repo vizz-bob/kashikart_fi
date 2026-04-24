@@ -5,15 +5,16 @@ from enum import Enum
 
 
 class SourceStatus(str, Enum):
-    ACTIVE = "active"
-    DISABLED = "disabled"
-    ERROR = "error"
-    WARNING = "warning"
+    # Keep in sync with DB (uppercase)
+    ACTIVE = "ACTIVE"
+    DISABLED = "DISABLED"
+    ERROR = "ERROR"
+    WARNING = "WARNING"
 
 
 class LoginType(str, Enum):
-    PUBLIC = "public"
-    REQUIRED = "required"
+    PUBLIC = "PUBLIC"
+    REQUIRED = "REQUIRED"
 
 
 class SourceBase(BaseModel):

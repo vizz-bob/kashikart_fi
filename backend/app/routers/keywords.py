@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
-from sqlalchemy.orm import Session
 from typing import List, Optional
 from sqlalchemy import func
 from app.core.database import get_db, AsyncSessionLocal
-from app.models.keyword import Keyword, KeywordCategory, KeywordPriority
+from app.models.keyword import Keyword, KeywordCategory
 from app.models.user import User
 from app.auth.dependencies import get_current_user
 from app.schemas.keyword_schema import (
@@ -13,6 +12,9 @@ from app.keyword_engine.matcher import KeywordMatcher
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -21,6 +23,16 @@ async def rebuild_keyword_matches_job():
     async with AsyncSessionLocal() as db:
         matcher = KeywordMatcher(db)
         await matcher.rebuild_all_matches()
+
+
+async def discover_sources_for_keyword_job(keyword: str):
+    """Runs in BackgroundTasks to auto-fetch tenders for a keyword."""
+    try:
+        from app.businessLogic.source_service import SourceService
+        async with AsyncSessionLocal() as db:
+            await SourceService.fetch_by_keywords(db, [keyword])
+    except Exception as exc:
+        logger.error(f"Keyword-based fetch failed for '{keyword}': {exc}")
 
 
 @router.get("/categories")
@@ -81,7 +93,7 @@ async def get_keywords(
         # Filters
         search: Optional[str] = Query(None),
         category: Optional[str] = Query(None),  # Changed from KeywordCategory enum to str
-        priority: Optional[KeywordPriority] = Query(None),
+        priority: Optional[str] = Query(None, pattern=r"^p(1|2|3|4|5|6|7|8|9|10|11)$"),
 
         # Pagination
         page: int = Query(1, ge=1),
@@ -177,6 +189,7 @@ async def create_keyword(
     await db.commit()
     await db.refresh(keyword)
     background_tasks.add_task(rebuild_keyword_matches_job)
+    background_tasks.add_task(discover_sources_for_keyword_job, keyword.keyword)
 
     return keyword
 

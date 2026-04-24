@@ -1,19 +1,33 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import or_, select, func
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime, timedelta
+from pydantic import BaseModel, Field
 
 from app.core.database import get_db
 from app.models.fetch_log import FetchLog, FetchStatus
 from app.models.source import Source
 from app.models.user import User
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, get_current_superuser
 from app.schemas.fetch_log_schema import (
     FetchLogResponse, FetchLogList, FetchLogFilter
 )
+from app.scheduler.jobs import (
+    fetch_all_sources_job,
+    fetch_single_source_job,
+    fetch_sources_by_keywords_job,
+)
 
 router = APIRouter()
+
+
+class KeywordFetchRequest(BaseModel):
+    keywords: List[str] = Field(..., min_items=1, description="Keywords to match (case-insensitive)")
+    source_ids: Optional[List[int]] = Field(
+        default=None,
+        description="Limit fetch to these source IDs. If omitted, all active sources are used."
+    )
 
 
 @router.get("/logs", response_model=FetchLogList)
@@ -24,7 +38,7 @@ async def get_fetch_logs(
         page: int = Query(1, ge=1),
         page_size: int = Query(25, ge=1, le=100),
         db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        current_user: User = Depends(get_current_superuser)
 ):
     # Base query
     base_query = select(FetchLog)
@@ -104,8 +118,6 @@ async def fetch_now(
         db: AsyncSession = Depends(get_db),
         current_user: User = Depends(get_current_user)
 ):
-    from app.scheduler.jobs import fetch_single_source_job, fetch_all_sources_job
-
     if source_id:
         result = await db.execute(
             select(Source).where(Source.id == source_id)
@@ -147,6 +159,55 @@ async def fetch_now(
         }
 
 
+@router.post("/by-keywords")
+async def fetch_by_keywords(
+        payload: KeywordFetchRequest,
+        background_tasks: BackgroundTasks = None,
+        db: AsyncSession = Depends(get_db),
+        current_user: User = Depends(get_current_user)
+):
+    """
+    Trigger a background fetch that only keeps tenders matching the provided
+    keywords. Optionally limit to a subset of source IDs.
+    """
+    keywords = [kw.strip() for kw in payload.keywords if kw and kw.strip()]
+    if not keywords:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one non-empty keyword is required"
+        )
+
+    source_ids = payload.source_ids
+    if source_ids:
+        # Validate source IDs and ensure they are active
+        result = await db.execute(
+            select(Source.id).where(
+                Source.is_active == True,
+                Source.id.in_(source_ids)
+            )
+        )
+        valid_ids = set(result.scalars().all())
+        missing = set(source_ids) - valid_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid or inactive source_ids: {sorted(missing)}"
+            )
+        source_ids = list(valid_ids)
+
+    background_tasks.add_task(
+        fetch_sources_by_keywords_job,
+        keywords,
+        source_ids
+    )
+
+    return {
+        "message": "Keyword-based fetch started",
+        "keywords": keywords,
+        "source_filter": source_ids or "all active"
+    }
+
+
 @router.get("/status")
 async def get_fetch_status(
         db: AsyncSession = Depends(get_db),
@@ -185,7 +246,7 @@ async def get_fetch_status(
 async def clear_old_logs(
         days: int = Query(30, ge=7, le=365),
         db: AsyncSession = Depends(get_db),
-        current_user: User = Depends(get_current_user)
+        current_user: User = Depends(get_current_superuser)
 ):
     cutoff_date = datetime.utcnow() - timedelta(days=days)
 

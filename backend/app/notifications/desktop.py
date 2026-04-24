@@ -7,8 +7,12 @@ class DesktopNotificationService:
     """Service for sending desktop notifications"""
 
     def __init__(self):
-        self.app_name = "Tender Intelligence System"
+        # Keep app name short to satisfy Windows balloon limits (<=64 chars)
+        self.app_name = "Tender Intel"
         self.app_icon = None  # Path to icon file if available
+        # Windows Shell_NotifyIconW has a 64‑char limit on title / tooltip; keep headroom
+        self.max_title_len = 60
+        self.max_message_len = 180
 
     def send_notification(
             self,
@@ -26,10 +30,19 @@ class DesktopNotificationService:
             tender_url: Optional URL to open on click
             timeout: Notification display duration in seconds
         """
+        # Hard trim to avoid Shell_NotifyIconW length errors on Windows
+        safe_title = (title or "").strip()
+        if len(safe_title) > self.max_title_len:
+            safe_title = safe_title[: self.max_title_len - 1] + "…"
+
+        safe_message = (message or "").strip()
+        if len(safe_message) > self.max_message_len:
+            safe_message = safe_message[: self.max_message_len - 1] + "…"
+
         try:
             notification.notify(
-                title=title,
-                message=message,
+                title=safe_title,
+                message=safe_message,
                 app_name=self.app_name,
                 app_icon=self.app_icon,
                 timeout=timeout

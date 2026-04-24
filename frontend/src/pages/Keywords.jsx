@@ -19,70 +19,7 @@ const NOTIFICATION_ENDPOINTS = {
   list: "/api/notifications/", // TODO BACKEND: yahi endpoint use hoga
 };
 
-const keywordsData = [
-  {
-    keyword: "IT Infrastructure",
-    category: "Information Technology",
-    priority: "High",
-    alerts: true,
-    created: "11/1/2025",
-  },
-  {
-    keyword: "Cybersecurity",
-    category: "Information Technology",
-    priority: "High",
-    alerts: true,
-    created: "11/1/2025",
-  },
-  {
-    keyword: "Construction",
-    category: "Construction",
-    priority: "Medium",
-    alerts: true,
-    created: "11/5/2025",
-  },
-  {
-    keyword: "Healthcare",
-    category: "Healthcare",
-    priority: "High",
-    alerts: true,
-    created: "11/10/2025",
-  },
-  {
-    keyword: "Environmental",
-    category: "Environmental",
-    priority: "Low",
-    alerts: false,
-    created: "11/15/2025",
-  },
-  {
-    keyword: "Software Development",
-    category: "Information Technology",
-    priority: "High",
-    alerts: true,
-    created: "11/20/2025",
-  },
-  {
-    keyword: "Facility Management",
-    category: "Services",
-    priority: "Medium",
-    alerts: true,
-    created: "12/1/2025",
-  },
-  {
-    keyword: "Medical Equipment",
-    category: "Healthcare",
-    priority: "Medium",
-    alerts: true,
-    created: "12/5/2025",
-  },
-];
-
-const INITIAL_NOTIFICATIONS = [
-  { id: 1, message: "New tender matched: IT Infrastructure", isRead: false },
-  { id: 2, message: "Keyword match found: Cybersecurity", isRead: false },
-  { id: 3, message: "Alerts paused for Environmental", isRead: true },
-];
+const INITIAL_NOTIFICATIONS = [];
 
 const initialCategories = [
   "Information Technology",
@@ -94,9 +31,9 @@ const initialCategories = [
 ];
 
 const getPriorityClasses = (priority) => {
-  const p = String(priority).toLowerCase();
-  if (p === "high") return "bg-red-100 text-red-600";
-  if (p === "medium") return "bg-yellow-100 text-yellow-700";
+  const p = Number(priority) || 0;
+  if (p >= 9) return "bg-red-100 text-red-600";
+  if (p >= 6) return "bg-yellow-100 text-yellow-700";
   return "bg-green-100 text-green-600";
 };
 
@@ -121,7 +58,7 @@ const KeywordRow = memo(function KeywordRow({
             item.priority
           )}`}
         >
-          {item.priority}
+            {`p${item.priority}`}
         </span>
       </div>
       <div>
@@ -157,7 +94,7 @@ const KeywordRow = memo(function KeywordRow({
 });
 
 export default function Keywords() {
-  const [keywords, setKeywords] = useState(keywordsData);
+  const [keywords, setKeywords] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(true);
@@ -165,14 +102,14 @@ export default function Keywords() {
   const [editForm, setEditForm] = useState({
     keyword: "",
     category: "",
-    priority: "",
+    priority: 5,
     alerts: true,
   });
   const [searchTerm, setSearchTerm] = useState("");
   const [newKeyword, setNewKeyword] = useState({
     keyword: "",
     category: "Information Technology",
-    priority: "High",
+    priority: 5,
   });
   const [categories, setCategories] = useState(initialCategories);
   const [showCategoryInput, setShowCategoryInput] = useState(false);
@@ -279,7 +216,7 @@ export default function Keywords() {
     setEditForm({
       keyword: item.keyword,
       category: item.category,
-      priority: item.priority,
+      priority: Number(item.priority) || 5,
       alerts: item.enable_alerts,
     });
     setShowEditCategoryInput(false);
@@ -295,10 +232,11 @@ export default function Keywords() {
       setLoading(true);
       setError(null);
 
+      const pr = Number(newKeyword.priority) || 5;
       const payload = {
         keyword: newKeyword.keyword.trim(),
         category: newKeyword.category,
-        priority: newKeyword.priority.toLowerCase(),
+        priority: `p${pr}`,
         enable_alerts: alertsEnabled
       };
 
@@ -310,7 +248,7 @@ export default function Keywords() {
       setNewKeyword({
         keyword: "",
         category: categories[0] || "Information Technology",
-        priority: "High",
+        priority: 5,
       });
       setAlertsEnabled(true);
       setShowCategoryInput(false);
@@ -335,10 +273,11 @@ export default function Keywords() {
       setLoading(true);
       setError(null);
 
+      const pr = Number(editForm.priority) || 5;
       const payload = {
         keyword: editForm.keyword.trim(),
         category: editForm.category,
-        priority: editForm.priority.toLowerCase(),
+        priority: `p${pr}`,
         enable_alerts: editForm.alerts
       };
 
@@ -496,7 +435,7 @@ export default function Keywords() {
         (item) =>
           (item.keyword || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
           (item.category || "").toLowerCase().includes(searchTerm.toLowerCase()) ||
-          (item.priority || "").toLowerCase().includes(searchTerm.toLowerCase())
+          String(item.priority ? `p${item.priority}` : "").toLowerCase().includes(searchTerm.toLowerCase())
       ),
     [safeKeywords, searchTerm]
   );
@@ -764,13 +703,18 @@ export default function Keywords() {
                 <select
                   value={newKeyword.priority}
                   onChange={(e) =>
-                    setNewKeyword({ ...newKeyword, priority: e.target.value })
+                    setNewKeyword({ ...newKeyword, priority: Number(e.target.value) })
                   }
                   className="w-full mt-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option>High</option>
-                  <option>Medium</option>
-                  <option>Low</option>
+                  {[...Array(11)].map((_, i) => {
+                    const val = 11 - i;
+                    return (
+                      <option key={val} value={val}>
+                        Priority {val}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
               <div className="flex items-center justify-between pt-2">
@@ -800,7 +744,7 @@ export default function Keywords() {
                   setNewKeyword({
                     keyword: "",
                     category: "Information Technology",
-                    priority: "High",
+        priority: 5,
                   });
                   setShowCategoryInput(false);
                   setNewCategoryInput("");
@@ -925,13 +869,18 @@ export default function Keywords() {
                 <select
                   value={editForm.priority}
                   onChange={(e) =>
-                    setEditForm({ ...editForm, priority: e.target.value })
+                    setEditForm({ ...editForm, priority: Number(e.target.value) })
                   }
                   className="w-full mt-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 >
-                  <option>High</option>
-                  <option>Medium</option>
-                  <option>Low</option>
+                  {[...Array(11)].map((_, i) => {
+                    const val = 11 - i;
+                    return (
+                      <option key={val} value={val}>
+                        Priority {val}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
               <div className="flex items-center justify-between pt-2">

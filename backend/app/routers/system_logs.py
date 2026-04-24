@@ -9,7 +9,7 @@ from app.models.fetch_log import FetchLog, FetchStatus
 from app.models.tender import Tender
 from app.models.source import Source
 from app.models.keyword import Keyword, TenderKeywordMatch
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_superuser
 
 router = APIRouter(tags=["System Logs"])
 
@@ -22,7 +22,7 @@ async def get_system_logs(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_superuser)
 ):
     """Return system logs (fetch_logs) for the System Logs page."""
 
@@ -118,7 +118,7 @@ async def get_system_logs(
 @router.delete("/")
 async def clear_system_logs(
     db: AsyncSession = Depends(get_db),
-    current_user=Depends(get_current_user)
+    current_user=Depends(get_current_superuser)
 ):
     """Clear all system logs."""
     await db.execute(

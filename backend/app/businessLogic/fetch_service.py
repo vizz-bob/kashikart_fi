@@ -1,8 +1,9 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 from app.models.source import Source
+from app.models.keyword import Keyword
 from app.models.tender import Tender
 from app.models.fetch_log import FetchLog, FetchStatus
 from app.scraping.implementations.html_scraper import HTMLScraper
@@ -28,12 +29,14 @@ class FetchService:
         self.notification_service = NotificationService(db)
         self.change_detector = ChangeDetectionService(db)
 
-    async def fetch_from_source(self, source_id: int) -> Dict:
+    async def fetch_from_source(self, source_id: int, keywords: Optional[List[str]] = None) -> Dict:
         """
         Fetch data from a specific source.
 
         Args:
             source_id: ID of source to fetch
+            keywords: Optional list of keywords to use for pre-filtering.
+                      If None, all active keywords in the DB are used.
 
         Returns:
             Dictionary with fetch results
@@ -66,6 +69,10 @@ class FetchService:
             logger.info(f"Starting fetch from {source.name}")
             raw_tenders = await scraper.scrape()
             print(f"DEBUG: raw_tenders len={len(raw_tenders)}")
+
+            # Pre-filter raw tenders by keywords (title+description) to reduce noise
+            raw_tenders = await self._filter_by_keywords(raw_tenders, keywords)
+            logger.info(f"Filtered to {len(raw_tenders)} tenders after keyword pre-check")
 
             logger.info(f"Fetched {len(raw_tenders)} tenders from {source.name}")
 
@@ -186,14 +193,48 @@ class FetchService:
                     if matches > 0:
                         results['matched'] += 1
 
-                        # Send notification
-                        await self.notification_service.notify_new_tender(tender)
+                    # Notify system/users for every new tender (regardless of keyword match)
+                    await self.notification_service.notify_new_tender(tender)
 
             except Exception as e:
                 logger.error(f"Error processing tender: {e}")
                 continue
 
         return results
+
+    async def _filter_by_keywords(
+        self,
+        tenders: List[Dict],
+        keywords: Optional[List[str]] = None
+    ) -> List[Dict]:
+        """
+        Lightweight pre-filter: keep tenders whose title/description contain any
+        provided keyword (case-insensitive). If no keywords are provided, falls
+        back to all active keywords in the DB. If still empty, returns original
+        list.
+        """
+        # Allow caller to pass an explicit keyword set; otherwise load active ones
+        keyword_list: List[str] = [
+            k.strip().lower() for k in (keywords or []) if k and k.strip()
+        ]
+
+        if not keyword_list:
+            result = await self.db.execute(
+                select(Keyword.keyword).where(Keyword.is_active == True)
+            )
+            keyword_list = [k.lower() for k in result.scalars().all()]
+
+        if not keyword_list:
+            return tenders
+
+        keyword_set = set(keyword_list)
+        filtered = []
+        for t in tenders:
+            text = f"{t.get('title','')} {t.get('description','')}".lower()
+            if any(k in text for k in keyword_set):
+                filtered.append(t)
+
+        return filtered
 
     async def _find_existing_tender(self, reference_id: str) -> Tender:
         """Find existing tender by reference_id"""

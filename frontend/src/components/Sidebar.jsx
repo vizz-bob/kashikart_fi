@@ -1,5 +1,6 @@
-import React, { useEffect, useRef, useState, useCallback, memo } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo, memo } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 import {
   LayoutDashboard,
   FileText,
@@ -13,16 +14,8 @@ import {
   History,
 } from "lucide-react";
 
-const menu = [
-  { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
-  { name: "Tenders", path: "/tenders", icon: FileText },
-  { name: "Keywords", path: "/keywords", icon: Search },
-  { name: "Sources", path: "/sources", icon: Globe },
-  { name: "Notifications", path: "/notifications", icon: Bell },
-  { name: "Analytics", path: "/analytics", icon: BarChart3 },
-  { name: "System Logs", path: "/system-logs", icon: ScrollText },
-  { name: "Login History", path: "/login-history", icon: History },
-];
+
+
 
 // export default function Sidebar({
 //   headerTitle = "Tender Intel",
@@ -35,57 +28,53 @@ const Sidebar = memo(function Sidebar({
   headerTitle = "Tender Intel",
   headerSubtitle = "Intelligent System",
 }) {
+  const { isAdmin, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [profilePhoto, setProfilePhoto] = useState(null);
-  const [profileName, setProfileName] = useState("User");
-  const [profileEmail, setProfileEmail] = useState("");
+  const profileName = user?.name || localStorage.getItem("profileName") || "User";
+  const profileEmail = user?.email || localStorage.getItem("profileEmail") || "";
   const [headerTitleText, setHeaderTitleText] = useState(headerTitle);
   const [headerSubtitleText, setHeaderSubtitleText] = useState(headerSubtitle);
   const [sidebarLogo, setSidebarLogo] = useState(null);
   const logoInputRef = useRef(null);
 
+  const menu = useMemo(() => [
+    { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard },
+    { name: "Tenders", path: "/tenders", icon: FileText },
+    { name: "Keywords", path: "/keywords", icon: Search },
+    { name: "Sources", path: "/sources", icon: Globe },
+    ...(isAdmin ? [{ name: "Notifications", path: "/notifications", icon: Bell }] : []),
+    { name: "Analytics", path: "/analytics", icon: BarChart3 },
+    { name: "System Logs", path: "/system-logs", icon: ScrollText },
+    ...(isAdmin ? [{ name: "Login History", path: "/login-history", icon: History }] : []),
+  ], [isAdmin]);
+
   useEffect(() => {
-    const readProfilePhoto = () => {
-      const storedPhoto = localStorage.getItem("profilePhoto");
-      setProfilePhoto(storedPhoto || null);
-    };
+    const storedPhoto = localStorage.getItem("profilePhoto");
+    if (storedPhoto) setProfilePhoto(storedPhoto);
+  }, []);
 
-    readProfilePhoto();
-    window.addEventListener("profilePhotoUpdated", readProfilePhoto);
-    window.addEventListener("storage", readProfilePhoto);
-
-    return () => {
-      window.removeEventListener("profilePhotoUpdated", readProfilePhoto);
-      window.removeEventListener("storage", readProfilePhoto);
-    };
+  const handleProfilePhotoUpdate = useCallback(() => {
+    const storedPhoto = localStorage.getItem("profilePhoto");
+    setProfilePhoto(storedPhoto || null);
   }, []);
 
   useEffect(() => {
-    const readProfileInfo = () => {
-      const storedName = localStorage.getItem("profileName");
-      const storedEmail = localStorage.getItem("profileEmail");
-      if (storedName) setProfileName(storedName);
-      if (storedEmail) setProfileEmail(storedEmail);
-    };
-
-    readProfileInfo();
-    window.addEventListener("profileInfoUpdated", readProfileInfo);
-    window.addEventListener("storage", readProfileInfo);
-
+    window.addEventListener("profilePhotoUpdated", handleProfilePhotoUpdate);
+    window.addEventListener("storage", handleProfilePhotoUpdate);
     return () => {
-      window.removeEventListener("profileInfoUpdated", readProfileInfo);
-      window.removeEventListener("storage", readProfileInfo);
+      window.removeEventListener("profilePhotoUpdated", handleProfilePhotoUpdate);
+      window.removeEventListener("storage", handleProfilePhotoUpdate);
     };
-  }, []);
+  }, [handleProfilePhotoUpdate]);
 
   useEffect(() => {
-    const storedTitle = localStorage.getItem("sidebarHeaderTitle");
-    const storedSubtitle = localStorage.getItem("sidebarHeaderSubtitle");
-
-    setHeaderTitleText(storedTitle || headerTitle);
-    setHeaderSubtitleText(storedSubtitle || headerSubtitle);
-  }, [headerTitle, headerSubtitle]);
+    const storedTitle = localStorage.getItem("sidebarHeaderTitle") || headerTitle;
+    const storedSubtitle = localStorage.getItem("sidebarHeaderSubtitle") || headerSubtitle;
+    setHeaderTitleText(storedTitle);
+    setHeaderSubtitleText(storedSubtitle);
+  }, []);
 
   useEffect(() => {
     const storedLogo = localStorage.getItem("sidebarHeaderLogo");
@@ -108,7 +97,7 @@ const Sidebar = memo(function Sidebar({
       setHeaderSubtitleText(finalSubtitle);
       localStorage.setItem("sidebarHeaderSubtitle", finalSubtitle);
     }
-  }, [headerSubtitle, headerTitle, headerSubtitleText, headerTitleText]);
+  }, [headerTitleText, headerSubtitleText]);
 
   const handleProfileToggle = useCallback(() => {
     if (location.pathname === "/profile") {
@@ -138,7 +127,6 @@ const Sidebar = memo(function Sidebar({
   }, []);
 
   return (
-    // {/* // <aside className="fixed left-0 top-0 h-screen w-64 bg-[#0b1222] text-white flex flex-col"> */}
     <>
       {isOpen && (
         <div
@@ -156,7 +144,6 @@ const Sidebar = memo(function Sidebar({
     ${collapsed ? "md:w-20" : "md:w-64"}
   `}
       >
-        {/* ================= LOGO ================= */}
         <div
           className={`border-b border-white/10 ${
             collapsed ? "px-4 py-5" : "px-6 py-5"
@@ -167,7 +154,6 @@ const Sidebar = memo(function Sidebar({
               collapsed ? "justify-center" : "gap-3"
             }`}
           >
-            {/* LOGO ICON */}
             <button
               type="button"
               onClick={triggerLogoPicker}
@@ -225,7 +211,6 @@ const Sidebar = memo(function Sidebar({
           </div>
         </div>
 
-        {/* ================= MENU ================= */}
         <nav className="flex-1 px-3 py-4 space-y-1">
           {menu.map((item) => {
             const Icon = item.icon;
@@ -234,7 +219,7 @@ const Sidebar = memo(function Sidebar({
               <NavLink
                 key={item.name}
                 to={item.path}
-                onClick={() => setIsOpen(false)} // 👈 mobile close
+                onClick={() => setIsOpen(false)}
                 className={({ isActive }) =>
                   `
                 group flex items-center rounded-xl transition-all
@@ -277,7 +262,6 @@ const Sidebar = memo(function Sidebar({
           })}
         </nav>
 
-        {/* ================= FOOTER ================= */}
         <div className="p-4 border-t border-white/10">
           <button
             onClick={handleProfileToggle}
@@ -294,7 +278,7 @@ const Sidebar = memo(function Sidebar({
               />
             ) : (
               <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#4f8cff] to-[#2563eb] flex items-center justify-center text-white font-semibold shadow">
-                G
+                {profileName.charAt(0).toUpperCase()}
               </div>
             )}
             {!collapsed && (
@@ -305,16 +289,11 @@ const Sidebar = memo(function Sidebar({
             )}
           </button>
 
-          {/* SETTINGS & LOGOUT */}
           <div
             className={`flex items-center mt-4 px-2 text-[12px] text-gray-400 ${
               collapsed ? "justify-center" : "justify-center"
             }`}
           >
-            {/* <button className="flex items-center gap-1 hover:text-[#4f8cff] transition">
-            <Settings size={14} />
-            Settings
-          </button> */}
             <button
               onClick={() => {
                 localStorage.removeItem("kashikart_token");

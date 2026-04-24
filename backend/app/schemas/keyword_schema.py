@@ -4,12 +4,6 @@ from datetime import datetime
 from enum import Enum
 
 
-class KeywordPriority(str, Enum):
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-
-
 class KeywordCategory(str, Enum):
     """Predefined categories - kept for reference and UI dropdowns"""
     INFORMATION_TECHNOLOGY = "Information Technology"
@@ -22,8 +16,8 @@ class KeywordCategory(str, Enum):
 
 class KeywordBase(BaseModel):
     keyword: str = Field(..., min_length=2, max_length=255)
-    category: str = Field(default="Other", min_length=1, max_length=100)  # Changed to str
-    priority: KeywordPriority = KeywordPriority.MEDIUM
+    category: str = Field(default="Other", min_length=1, max_length=100)
+    priority: str = Field(..., max_length=10)
     enable_alerts: bool = True
 
     @validator('category')
@@ -45,8 +39,8 @@ class KeywordCreate(KeywordBase):
 
 class KeywordUpdate(BaseModel):
     keyword: Optional[str] = Field(None, min_length=2, max_length=255)
-    category: Optional[str] = Field(None, min_length=1, max_length=100)  # Changed to str
-    priority: Optional[KeywordPriority] = None
+    category: Optional[str] = Field(None, min_length=1, max_length=100)
+    priority: Optional[str] = Field(None, max_length=10)
     enable_alerts: Optional[bool] = None
     is_active: Optional[bool] = None
 
@@ -79,10 +73,10 @@ class KeywordResponse(KeywordBase):
 
 
 class KeywordList(BaseModel):
-    page: int  # Added from your router
-    size: int  # Added from your router
+    page: int
+    size: int
     total: int
-    pages: int  # Added from your router
+    pages: int
     items: List[KeywordResponse]
 
 
@@ -90,3 +84,4 @@ class CategoryResponse(BaseModel):
     """Response model for categories endpoint"""
     predefined: List[str]
     all: List[str]
+

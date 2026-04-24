@@ -2,6 +2,7 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List
+from jinja2 import Template
 
 from app.core.config import settings
 from app.models.tender import Tender
@@ -99,6 +100,9 @@ class EmailNotificationService:
             keywords: List[Keyword]
     ) -> str:
         """Build HTML email body for tender notification"""
+        deadline_val = getattr(tender, "deadline_date", None)
+        location_val = getattr(tender, "agency_location", None)
+
         template = Template("""
         <!DOCTYPE html>
         <html>
@@ -124,8 +128,8 @@ class EmailNotificationService:
 
                     <p><span class="label">Agency:</span> {{ tender.agency_name }}</p>
                     <p><span class="label">Reference:</span> {{ tender.reference_id }}</p>
-                    <p><span class="label">Deadline:</span> {{ tender.deadline }}</p>
-                    <p><span class="label">Location:</span> {{ tender.location }}</p>
+                    <p><span class="label">Deadline:</span> {{ deadline }}</p>
+                    <p><span class="label">Location:</span> {{ location }}</p>
 
                     {% if tender.description %}
                     <p><span class="label">Description:</span></p>
@@ -152,7 +156,12 @@ class EmailNotificationService:
         </html>
         """)
 
-        return template.render(tender=tender, keywords=keywords)
+        return template.render(
+            tender=tender,
+            keywords=keywords,
+            deadline=deadline_val or "N/A",
+            location=location_val or "N/A",
+        )
 
     def _build_tender_email_text(
             self,
@@ -160,14 +169,17 @@ class EmailNotificationService:
             keywords: List[Keyword]
     ) -> str:
         """Build plain text email body"""
+        deadline_val = getattr(tender, "deadline_date", None)
+        location_val = getattr(tender, "agency_location", None)
+
         text = f"""
 NEW TENDER MATCH FOUND!
 
 Title: {tender.title}
 Agency: {tender.agency_name}
 Reference: {tender.reference_id}
-Deadline: {tender.deadline}
-Location: {tender.location}
+Deadline: {deadline_val}
+Location: {location_val}
 
 Matched Keywords: {', '.join([k.keyword for k in keywords])}
 
@@ -181,16 +193,18 @@ Sent by Tender Intelligence System
     def _build_deadline_email_html(self, tender: Tender, days: int) -> str:
         """Build HTML for deadline alert"""
         # Simplified version
+        deadline_val = getattr(tender, "deadline_date", None)
         return f"""
         <h2>⏰ Tender Deadline Alert</h2>
         <p><strong>{tender.title}</strong></p>
-        <p>Deadline in {days} days: {tender.deadline}</p>
+        <p>Deadline in {days} days: {deadline_val}</p>
         <a href="{tender.source_url}">View Tender</a>
         """
 
     def _build_deadline_email_text(self, tender: Tender, days: int) -> str:
         """Build text for deadline alert"""
-        return f"Tender Deadline Alert\n{tender.title}\nDeadline in {days} days: {tender.deadline}"
+        deadline_val = getattr(tender, "deadline_date", None)
+        return f"Tender Deadline Alert\n{tender.title}\nDeadline in {days} days: {deadline_val}"
 
     def _build_digest_email_html(self, tenders: List[Tender], period: str) -> str:
         """Build HTML for digest email"""
@@ -238,7 +252,15 @@ Sent by Tender Intelligence System
             return True
 
         except Exception as e:
-            logger.error(f"Failed to send email: {e}")
+            logger.error(
+                "Failed to send email",
+                extra={
+                    "error": str(e),
+                    "host": self.smtp_host,
+                    "port": self.smtp_port,
+                    "user": self.smtp_user,
+                },
+            )
             return False
 
 async def send_email_notification(
@@ -255,4 +277,3 @@ async def send_email_notification(
         matched_keywords=matched_keywords,
         recipients=recipients
     )
-

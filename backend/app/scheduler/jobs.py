@@ -2,12 +2,13 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from sqlalchemy import select
 from app.core.database import AsyncSessionLocal
 from app.models.source import Source
 from app.models.fetch_log import FetchLog, FetchStatus
 from app.businessLogic.fetch_service import FetchService
+from app.businessLogic.source_service import SourceService
 from app.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -48,6 +49,33 @@ async def fetch_all_sources_job():
 
         except Exception as e:
             logger.error(f"Error in fetch_all_sources_job: {e}")
+
+
+async def fetch_sources_by_keywords_job(
+        keywords: List[str],
+        source_ids: Optional[List[int]] = None
+):
+    """
+    Fetch only tenders that match the provided keywords.
+    If source_ids is supplied, limit the fetch to those sources.
+    """
+    logger.info(
+        f"Starting keyword-based fetch for {len(keywords)} keywords; "
+        f"source filter: {source_ids if source_ids else 'all active'}"
+    )
+
+    async with AsyncSessionLocal() as db:
+        try:
+            summary = await SourceService.fetch_by_keywords(
+                db,
+                keywords=keywords,
+                source_ids=source_ids
+            )
+            logger.info(f"Keyword-based fetch completed: {summary}")
+            return summary
+        except Exception as e:
+            logger.error(f"Error in fetch_sources_by_keywords_job: {e}")
+            return {"error": str(e), "success": False}
 
 
 async def fetch_single_source_job(source_id: int):

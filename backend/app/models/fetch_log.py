@@ -6,12 +6,13 @@ import enum
 
 
 class FetchStatus(str, enum.Enum):
-    RUNNING = "running"
-    SUCCESS = "success"
-    WARNING = "warning"
-    ERROR = "error"
-    FAILED = "failed"
-    INFO = "info"
+    # Stored values in DB are uppercase
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    FAILED = "FAILED"
+    INFO = "INFO"
 
 
 class FetchLog(Base):

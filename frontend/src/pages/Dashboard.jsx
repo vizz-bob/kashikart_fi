@@ -19,186 +19,24 @@ import {
   MoreHorizontal,
 } from "lucide-react";
 import { getErrorMessage, requestJson, requestWithRetry } from "../utils/api";
+import {
+  ensureNotificationPermission,
+  notifyNewTenders,
+} from "../utils/notifications";
 
 const VALID_TENDER_STATUS = ["new", "viewed", "saved"];
-const USE_MOCK_ATTACHMENTS = true;
 const DASHBOARD_ENDPOINTS = {
   fetch: "/api/dashboard",
   sync: "/api/dashboard/sync",
 };
-
-/* ================= MOCK DATA ================= */
-// NOTE: Backend connect ke baad ye mock data hata dena hai.
-// Ye sab remove hoga: BASE_*, buildMock*, INITIAL_*
-const BASE_NOTIFICATIONS = [
-  { id: 1, message: "New tender added from SAM.gov", isRead: false },
-  {
-    id: 2,
-    message: "Tender deadline approaching (5 days left)",
-    isRead: false,
-  },
-  { id: 3, message: "Source DHS Contract is in warning state", isRead: true },
-];
-
-const BASE_TENDERS = [
-  {
-    id: 1,
-    title: "IT Infrastructure Modernization for federal facilities",
-    code: "GSA-2026-IT-C01",
-    agency: "General Service Administration (GSA)",
-    location: "Washington DC",
-    source: "SAM.gov",
-    deadline: "FEB 15, 2026",
-    daysLeft: "38 Days left",
-    status: "NEW",
-    keywords: ["IT Infrastructure", "Modernization"],
-    attachments: [
-      {
-        name: "RFP_Document.pdf",
-        size: "2.4 MB",
-        type: "pdf",
-      },
-      {
-        name: "Technical_Requirements.pdf",
-        size: "1.1 MB",
-        type: "pdf",
-      },
-    ],
-  },
-  {
-    id: 2,
-    title: "Highway Construction Project - Interstate 95 Ex...",
-    code: "DOT-HWY-2026-042",
-    agency: "Department of Transportation",
-    location: "Virginia",
-    source: "DOT Portal",
-    deadline: "Jan 30, 2026",
-    daysLeft: "17 days left",
-    status: "VIEWED",
-    keywords: ["Construction", "Highway"],
-    attachments: [
-      {
-        name: "Site_Specs.pdf",
-        size: "3.8 MB",
-        type: "pdf",
-      },
-    ],
-  },
-  {
-    id: 3,
-    title: "Healthcare Equipment Procurement - Medical I..",
-    code: "VA-MED-2026-10",
-    agency: "Veterans Affairs",
-    location: "Multiple Locations",
-    source: "VA Procurement",
-    deadline: "Feb 28, 2026",
-    daysLeft: "46 days left",
-    status: "NEW",
-    keywords: ["Healthcare", "Medical Equipment"],
-    attachments: [
-      {
-        name: "Vendor_Checklist.docx",
-        size: "420 KB",
-        type: "docx",
-      },
-    ],
-  },
-  {
-    id: 4,
-    title: "Cybersecurity Services - Federal Network Protectio",
-    code: "DHS-CYBER-2026-015",
-    agency: "Department of Homeland Security",
-    location: "Remote/DC",
-    source: "DHS Contracts",
-    deadline: "Mar 1, 2026",
-    daysLeft: "47 days left",
-    status: "SAVED",
-    keywords: ["Cybersecurity", "IT"],
-    attachments: [],
-  },
-  {
-    id: 5,
-    title: "Building Renovation - Federal Courthouse",
-    code: "GSA-CONST-2026-087",
-    agency: "General Service Administration (GSA)",
-    location: "New York, NY",
-    source: "SAM.gov",
-    deadline: "Jan 25, 2026",
-    daysLeft: "12 days left",
-    status: "NEW",
-    keywords: ["Construction", "Renovation"],
-    attachments: [
-      {
-        name: "Project_Drawings.zip",
-        size: "12.6 MB",
-        type: "zip",
-      },
-    ],
-  },
-];
-
-const BASE_TOP_KEYWORDS = [
-  { rank: 1, name: "IT Infrastructure", matches: 24, color: "green" },
-  { rank: 2, name: "Cybersecurity", matches: 18, color: "green" },
-  { rank: 3, name: "Construction", matches: 16, color: "red" },
-  { rank: 4, name: "Healthcare", matches: 12, color: "green" },
-  { rank: 5, name: "Software Development", matches: 9, color: "gray" },
-];
-
-const BASE_SOURCES = [
-  {
-    name: "SAM.gov",
-    status: "ACTIVE",
-    count: "53 new today",
-    color: "green",
-  },
-  {
-    name: "DOT portal",
-    status: "ACTIVE",
-    count: "8 new today",
-    color: "green",
-  },
-  {
-    name: "VA Procurement",
-    status: "ACTIVE",
-    count: "5 new today",
-    color: "green",
-  },
-  {
-    name: "DHS Contract",
-    status: "WARNING",
-    count: "3 new today",
-    color: "orange",
-  },
-  { name: "EPA portal", status: "ERROR", count: "0 new today", color: "red" },
-  {
-    name: "DoD Connect",
-    status: "ACTIVE",
-    count: "12 new today",
-    color: "green",
-  },
-];
-
-function buildMockDashboard() {
-  return {
-    notifications: BASE_NOTIFICATIONS,
-    tenders: BASE_TENDERS,
-    topKeywords: BASE_TOP_KEYWORDS,
-    sources: BASE_SOURCES,
-    lastSyncAt: "2026-01-01 08:30 AM",
-    nextSyncIn: "23 minutes",
-    stats: {
-      newTendersToday: 52,
-      keywordMatches: 18,
-      activeSources: { active: 56, total: 62 },
-      alertsToday: 7,
-      trendNewTenders: 12,
-      trendKeywords: 8,
-    },
-  };
-}
-
-const INITIAL_DASHBOARD = buildMockDashboard();
+const EMPTY_STATS = {
+  newTendersToday: 0,
+  keywordMatches: 0,
+  activeSources: { active: 0, total: 0 },
+  alertsToday: 0,
+  trendNewTenders: 0,
+  trendKeywords: 0,
+};
 
 function getTenderKeywordsText(tender) {
   if (!tender) return "";
@@ -225,6 +63,11 @@ function safeStatus(status) {
   return VALID_TENDER_STATUS.includes(String(status).toLowerCase()) ? String(status).toLowerCase() : "viewed";
 }
 
+function getTenderKey(tender) {
+  if (!tender) return null;
+  return tender.id ?? tender.reference_id ?? tender.code ?? null;
+}
+
 function isValidTender(tender) {
   if (!tender) return false;
 
@@ -240,7 +83,7 @@ function isValidTender(tender) {
 }
 
 function computeStatsFromData(stats) {
-  if (!stats) return INITIAL_DASHBOARD.stats;
+  if (!stats) return { ...EMPTY_STATS };
   
   // Handle both snake_case (direct stats api) and camelCase (dashboard sync api)
   return {
@@ -256,6 +99,16 @@ function computeStatsFromData(stats) {
   };
 }
 
+function formatCountdown(seconds) {
+  if (seconds === null || seconds === undefined || Number.isNaN(seconds)) {
+    return "—";
+  }
+  const safe = Math.max(0, Math.floor(seconds));
+  const mins = Math.floor(safe / 60);
+  const secs = safe % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
 const Dashboard = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [showNotifications, setShowNotifications] = useState(false);
@@ -268,12 +121,32 @@ const Dashboard = () => {
   const [sources, setSources] = useState([]);
   const [lastSyncAt, setLastSyncAt] = useState("");
   const [nextSyncIn, setNextSyncIn] = useState("");
-  const [stats, setStats] = useState({});
+  const [syncCountdown, setSyncCountdown] = useState(20 * 60);
+  const [stats, setStats] = useState({ ...EMPTY_STATS });
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 5;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const notificationMenuRef = useRef(null);
+  const tenderIdsRef = useRef(new Set());
+  const hasTenderSnapshotRef = useRef(false);
+
+  const pushRealtimeNotifications = useCallback((newItems) => {
+    if (!newItems?.length) return;
+
+    // In-app notification list (keep last 25 entries)
+    setNotifications((prev) => {
+      const mapped = newItems.map((t) => ({
+        id: `rt-${getTenderKey(t) || Date.now()}`,
+        message: `New tender fetched: ${t.title || t.reference_id || "Untitled"}`,
+        isRead: false,
+      }));
+      const next = [...prev, ...mapped];
+      return next.slice(-25);
+    });
+
+    notifyNewTenders(newItems);
+  }, []);
 
   const fetchDashboard = useCallback(async () => {
     try {
@@ -329,6 +202,22 @@ const Dashboard = () => {
           isRead: Boolean(n?.isRead ?? n?.is_read),
         }))
       );
+
+      const tenderIds = new Set(
+        (tendersData || [])
+          .map((t) => getTenderKey(t))
+          .filter(Boolean)
+      );
+      tenderIdsRef.current = tenderIds;
+      hasTenderSnapshotRef.current = true;
+
+      const nextSyncSeconds = Number(statsData?.next_tender_sync_in_seconds);
+      const resolvedNextSync = Number.isFinite(nextSyncSeconds)
+        ? nextSyncSeconds
+        : 20 * 60;
+
+      setSyncCountdown(resolvedNextSync);
+      setNextSyncIn(formatCountdown(resolvedNextSync));
       
       // Update local lastSync meta
       const latestSync = sourcesData.reduce((prev, curr) => {
@@ -347,9 +236,52 @@ const Dashboard = () => {
     }
   }, []);
 
+  const pollRecentTenders = useCallback(async () => {
+    try {
+      const data = await requestWithRetry(() =>
+        requestJson("/api/dashboard/recent-tenders")
+      );
+
+      const items = Array.isArray(data) ? data : data?.items || [];
+      const ids = new Set(
+        items
+          .map((t) => getTenderKey(t))
+          .filter(Boolean)
+      );
+
+      let newlyArrived = [];
+      if (hasTenderSnapshotRef.current) {
+        newlyArrived = items.filter((t) => {
+          const key = getTenderKey(t);
+          return key && !tenderIdsRef.current.has(key);
+        });
+      }
+
+      tenderIdsRef.current = ids;
+      hasTenderSnapshotRef.current = true;
+
+      setTenderList(items);
+
+      if (newlyArrived.length) {
+        pushRealtimeNotifications(newlyArrived);
+      }
+    } catch (err) {
+      console.error("[Dashboard] Realtime tender poll failed", err);
+    }
+  }, [pushRealtimeNotifications]);
+
   useEffect(() => {
     fetchDashboard();
   }, [fetchDashboard]);
+
+  useEffect(() => {
+    ensureNotificationPermission();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(pollRecentTenders, 20000);
+    return () => clearInterval(interval);
+  }, [pollRecentTenders]);
 
   const unreadCount = useMemo(
     () => notifications.filter((n) => !n.isRead).length,
@@ -388,6 +320,21 @@ const Dashboard = () => {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, tenderList]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setSyncCountdown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    setNextSyncIn(formatCountdown(syncCountdown));
+    if (syncCountdown === 0) {
+      fetchDashboard();
+      setSyncCountdown(20 * 60);
+    }
+  }, [syncCountdown, fetchDashboard]);
 
   useEffect(() => {
     if (!showNotifications) return;
@@ -591,14 +538,27 @@ const Dashboard = () => {
     }
   }, []);
 
+  const openTenderSource = useCallback((tender) => {
+    if (!tender) return;
+    const url =
+      tender.source_url ||
+      tender.url ||
+      tender.link ||
+      tender.source_link;
+    if (url && typeof window !== "undefined") {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  }, []);
+
   const handleViewTender = useCallback(
     (tender) => {
       const currentStatus = String(tender.status || "").toLowerCase();
       const nextStatus = currentStatus === "saved" ? "saved" : "viewed";
       updateTenderStatus(tender.id, nextStatus);
       setSelectedTender(tender);
+      openTenderSource(tender);
     },
-    [updateTenderStatus]
+    [updateTenderStatus, openTenderSource]
   );
 
   const handleToggleSave = useCallback(
@@ -612,22 +572,9 @@ const Dashboard = () => {
 
   const handleAttachmentOpen = useCallback((attachment) => {
     if (!attachment) return;
-
-    if (!USE_MOCK_ATTACHMENTS && attachment.url) {
+    if (attachment.url) {
       window.open(attachment.url, "_blank", "noopener,noreferrer");
-      return;
     }
-
-    const content = `Mock attachment: ${attachment.name}\nGenerated for UI preview.`;
-    const blob = new Blob([content], { type: "text/plain" });
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = objectUrl;
-    link.download = attachment.name || "attachment.txt";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(objectUrl);
   }, []);
 
   const handleSyncNow = useCallback(async () => {
@@ -650,7 +597,12 @@ const Dashboard = () => {
       setTopKeywords(data.topKeywords || []);
       setSources(data.sources || []);
       setLastSyncAt(data.lastSyncAt || new Date().toLocaleString());
-      setNextSyncIn(data.nextSyncIn || "—");
+      const nextSyncSeconds = Number(data?.nextTenderSyncSeconds);
+      const resolvedNextSync = Number.isFinite(nextSyncSeconds)
+        ? nextSyncSeconds
+        : 20 * 60;
+      setSyncCountdown(resolvedNextSync);
+      setNextSyncIn(formatCountdown(resolvedNextSync));
       setStats(
         data.stats ||
           computeStatsFromData(

@@ -1,5 +1,6 @@
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+import { useAuth } from "./contexts/AuthContext";
 import ErrorBoundary from "./components/ErrorBoundary";
 // import DashboardLayout from "./layout/DashboardLayout";
 import Layout from "./layout/Layout";
@@ -24,7 +25,15 @@ function hasAuthToken() {
 }
 
 function RequireAuth({ children }) {
+  const { loading } = useAuth();
+  if (loading) return <div>Loading...</div>;
   return hasAuthToken() ? children : <Navigate to="/login" replace />;
+}
+
+function AdminRoute({ children }) {
+  const { isAdmin, loading } = useAuth();
+  if (loading) return <div>Loading...</div>;
+  return isAdmin ? children : <Navigate to="/dashboard" replace />;
 }
 
 /* =========================
@@ -57,14 +66,14 @@ function DashboardLayout() {
         <Route path="/keywords" element={withPageBoundary(<Keywords />)} />
         <Route
           path="/notifications"
-          element={withPageBoundary(<Notifications />)}
+          element={<AdminRoute>{withPageBoundary(<Notifications />)}</AdminRoute>}
         />
         <Route path="/analytics" element={withPageBoundary(<Analytics />)} />
         <Route path="/sources" element={withPageBoundary(<Sources />)} />
         <Route path="/system-logs" element={withPageBoundary(<SystemLogs />)} />
         <Route
           path="/login-history"
-          element={withPageBoundary(<LoginHistory />)}
+          element={<AdminRoute>{withPageBoundary(<LoginHistory />)}</AdminRoute>}
         />
         <Route path="/profile" element={withPageBoundary(<MyProfile />)} />
 

@@ -1,6 +1,15 @@
 import sys
 import asyncio
-if sys.platform.startswith("win"):
+import os
+from pathlib import Path
+
+# Ensure project root on sys.path when running as a script
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+# Windows event loop policy is deprecated in Python 3.16; gate it
+if sys.platform.startswith("win") and sys.version_info < (3, 13):
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from fastapi import FastAPI, Request
@@ -12,6 +21,8 @@ import logging
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.core.scheduler import scheduler, start_scheduler
+from fastapi import WebSocket, WebSocketDisconnect
+from app.core.realtime import manager
 
 from fastapi.staticfiles import StaticFiles
 # One-Drive
@@ -49,10 +60,12 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Tender Intel System...")
 
     #  ASYNC SAFE TABLE CREATION
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    logger.info("Database tables created/verified")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database tables created/verified")
+    except Exception as e:
+        logger.warning(f"Database connection failed, skipping table creation: {str(e)}")
 
     # Start scheduler
     if not scheduler.running:
@@ -77,8 +90,7 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# CORS Configuration
-# Includes localhost (dev), EC2 public IP, and Electron (file://)
+# CORS Configuration — open for Electron desktop app compatibility
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -143,14 +155,19 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "Internal server error occurred"}
     )
-from fastapi.staticfiles import StaticFiles
 
-# Path to your frontend build
-# # frontend_path = "/home/ubuntu/kashikart/backend/frontend-dist"
-
-# Serve frontend static files (HTML, CSS, JS)
-# # app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    host = os.getenv("APP_HOST", "127.0.0.1")
+    port = int(os.getenv("APP_PORT", os.getenv("PORT", "8000")))
+    uvicorn.run(app, host=host, port=port, log_level="info")
+
+@app.websocket("/ws/notifications")
+async def websocket_notifications(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()  # keep alive
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)

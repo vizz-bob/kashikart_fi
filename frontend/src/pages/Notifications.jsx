@@ -17,20 +17,13 @@ const NOTIFICATION_ENDPOINTS = {
 
 const PRIMARY_BLUE = "#3B82F6";
 
-const INITIAL_NOTIFICATIONS = [
-  { id: 1, message: "New tender matched: IT Infrastructure", isRead: false },
-  { id: 2, message: "Deadline approaching: DOT-HWY-2026-042", isRead: false },
-  { id: 3, message: "System sync completed", isRead: true },
-];
+const INITIAL_NOTIFICATIONS = [];
 
 export default function Notifications() {
   const [desktop, setDesktop] = useState(true);
   const [email, setEmail] = useState(true);
   const [silent, setSilent] = useState(true);
-  const [emailList, setEmailList] = useState([
-    "john.doe@company.com",
-    "tender.team@company.com",
-  ]);
+  const [emailList, setEmailList] = useState([]);
   const [newEmail, setNewEmail] = useState("");
   const [startTime, setStartTime] = useState("22:00");
   const [endTime, setEndTime] = useState("07:00");

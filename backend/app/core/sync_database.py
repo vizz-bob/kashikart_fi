@@ -8,15 +8,15 @@ DATABASE_URL_SYNC = settings.DATABASE_URL.replace("postgresql+asyncpg", "postgre
 
 # SSL cert for RDS
 _ssl_cert = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "global-bundle.pem")
+_connect_args = {}
+if os.path.exists(_ssl_cert):
+    _connect_args = {"sslmode": "verify-full", "sslrootcert": _ssl_cert}
 
 engine_sync = create_engine(
     DATABASE_URL_SYNC,
     pool_pre_ping=True,
     pool_recycle=3600,
-    connect_args={
-        "sslmode": "verify-full",
-        "sslrootcert": _ssl_cert,
-    }
+    connect_args=_connect_args,
 )
 
 SyncSessionLocal = sessionmaker(bind=engine_sync)

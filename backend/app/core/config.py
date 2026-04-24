@@ -91,9 +91,13 @@ def _resolve_env_file() -> str:
     return str(Path(__file__).resolve().parents[2] / ".env")
 
 
+# Load .env if present so SMTP/DB credentials can be overridden locally
 ENV_FILE_PATH = _resolve_env_file()
 if Path(ENV_FILE_PATH).exists():
-    load_dotenv(ENV_FILE_PATH, override=True)
+    load_dotenv(ENV_FILE_PATH, override=False)
+elif Path(".env").exists():
+    # Fallback when scripts are run from project root (cwd)
+    load_dotenv(".env", override=False)
 
 
 class Settings(BaseSettings):
@@ -111,18 +115,18 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Database
     # ------------------------------------------------------------------
-    DATABASE_URL: str
+    DATABASE_URL: str = "sqlite+aiosqlite:///./tender_dev.db"
     DATABASE_HOST: str = "localhost"
     DATABASE_PORT: int = 3306
     DATABASE_USER: str = "root"
-    DATABASE_PASSWORD: str
-    DATABASE_NAME: str = "tender_db"
+    DATABASE_PASSWORD: str = ""
+    DATABASE_NAME: str = "tender_dev"
 
     # ------------------------------------------------------------------
     # Security
     # ------------------------------------------------------------------
-    SECRET_KEY: str
-    ENCRYPTION_KEY: str
+    SECRET_KEY: str = "super-secret-key-change-in-production!!"
+    ENCRYPTION_KEY: str = "SGVsbG8gV29ybGQhMTIzNDU2Nzg5MDEyMzQ1Njc4OTA=="
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
@@ -131,9 +135,9 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
-    SMTP_USER: str
-    SMTP_PASSWORD: str
-    SMTP_FROM_EMAIL: str
+    SMTP_USER: str = "ankursati75956@gmail.com"
+    SMTP_PASSWORD: str = "buyppybrlzsnozjz"
+    SMTP_FROM_EMAIL: str = "ankursati75956@gmail.com"
     SMTP_FROM_NAME: str = "Tender Intel"
     SMTP_TLS: bool = True
 
@@ -186,12 +190,9 @@ class Settings(BaseSettings):
     # Pydantic Settings Config (v2)
     # ------------------------------------------------------------------
     model_config = SettingsConfigDict(
-        env_file=ENV_FILE_PATH,
         case_sensitive=True,
         extra="ignore"
     )
 
 
 settings = Settings()
-
-print("Loaded DATABASE_URL:", settings.DATABASE_URL)

@@ -4,6 +4,8 @@ from sqlalchemy import select
 
 from app.core.database import get_db
 from app.auth.dependencies import get_current_superuser
+from fastapi import HTTPException
+from datetime import datetime
 
 from app.models.login_history import LoginHistory
 from app.models.user import User
@@ -166,14 +168,12 @@ async def get_all_users(
     db: AsyncSession = Depends(get_db),
     _ = Depends(get_current_superuser),
 
-
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
 
     is_blocked: bool | None = None,
     email: str | None = None,
 ):
-
     offset = (page - 1) * size
 
     query = select(User)
@@ -198,7 +198,10 @@ async def get_all_users(
     if is_blocked is not None:
         count_q = count_q.where(User.is_blocked == is_blocked)
 
-    total = len((await db.execute(count_q)).all())
+    if email:
+        count_q = count_q.where(User.email.ilike(f"%{email}%"))
+
+    total = (await db.execute(count_q)).scalar() or 0
 
     return {
         "page": page,
@@ -218,4 +221,36 @@ async def get_all_users(
             }
             for u in users
         ]
+    }
+
+
+@router.delete("/users/{user_id}", status_code=200)
+async def delete_user(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_superuser)
+):
+    """Admin-only: Soft-delete user (set inactive/blocked)."""
+    if user_id == current_user.id:
+        raise HTTPException(status_code=403, detail="Cannot delete own account")
+
+    result = await db.execute(
+        select(User).where(User.id == user_id)
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Soft delete
+    user.is_active = False
+    user.is_blocked = True
+    user.updated_at = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(user)
+
+    return {
+        "message": f"User '{user.email}' soft-deleted successfully",
+        "user_id": user_id
     }

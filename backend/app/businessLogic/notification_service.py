@@ -9,9 +9,11 @@ from app.models.notification import Notification, NotificationType, Notification
 from app.models.tender import Tender
 from app.models.keyword import Keyword
 from app.models.user import User
+from app.models.notification_settings import NotificationSettings as NotificationSettingsModel
 from app.notifications.email import EmailNotificationService
 from app.notifications.desktop import DesktopNotificationService
 from app.core.config import settings
+from app.core.realtime import push_notification
 
 
 logger = logging.getLogger(__name__)
@@ -31,9 +33,111 @@ class NotificationService:
         self.db = db
 
     async def notify_new_tender(self, tender: Tender):
-        # Implementation of notify_new_tender
-        # For now, let's just use the logic from send_new_tender_notification
         await self.send_new_tender_notification(self.db, tender)
+
+    def send_system_notification(self, title: str, message: str):
+        """
+        Lightweight helper for scheduler/system events.
+        Uses desktop notifications only (no DB dependency).
+        """
+        try:
+            DesktopNotificationService().send_notification(title=title, message=message)
+        except Exception as e:
+            logger.error(f"System notification failed: {e}")
+
+    # --------------------------------------------------
+    # ADMIN ERROR PIPE
+    # --------------------------------------------------
+    @staticmethod
+    async def _notify_admins_of_error(
+        db: AsyncSession,
+        title: str,
+        message: str
+    ):
+        """
+        Create SYSTEM_ERROR notifications for all active superusers.
+        Keeps failures contained so it never breaks the caller flow.
+        """
+        try:
+            result = await db.execute(
+                select(User).where(
+                    User.is_active == True,
+                    User.is_superuser == True,
+                )
+            )
+            admins = result.scalars().all()
+
+            if not admins:
+                return
+
+            for admin in admins:
+                admin_notification = Notification(
+                    user_id=admin.id,
+                    module=MODULES["SYSTEM"],
+                    type=NotificationType.SYSTEM_ERROR,
+                    channel=NotificationChannel.DESKTOP,
+                    title=title[:255],
+                    message=message,
+                )
+                db.add(admin_notification)
+
+            await db.flush()
+        except Exception as inner_ex:
+            # Last-resort log so we don't mask the original caller
+            logger.error(f"Failed to notify admins: {inner_ex}")
+
+    # --------------------------------------------------
+    # HELPERS
+    # --------------------------------------------------
+    @staticmethod
+    async def _get_user_settings_map(
+        db: AsyncSession,
+        user_ids: List[int]
+    ) -> dict:
+        """
+        Fetch notification settings for a list of users as a dict[user_id] = settings.
+        """
+        if not user_ids:
+            return {}
+
+        result = await db.execute(
+            select(NotificationSettingsModel).where(
+                NotificationSettingsModel.user_id.in_(user_ids)
+            )
+        )
+        settings_list = result.scalars().all()
+        return {s.user_id: s for s in settings_list}
+
+    @staticmethod
+    def _build_recipient_list(user: User, settings_obj: NotificationSettingsModel) -> List[str]:
+        """
+        Combine the primary user email with additional recipients from settings.
+        """
+        recipients = []
+
+        if settings_obj:
+            if settings_obj.enable_email:
+                if user.email:
+                    recipients.append(user.email)
+                if settings_obj.email_recipients:
+                    recipients.extend(settings_obj.email_recipients)
+        else:
+            # fallback to user email if settings are missing
+            if user.email:
+                recipients.append(user.email)
+
+        # deduplicate while preserving order
+        seen = set()
+        unique = []
+        for r in recipients:
+            if not r:
+                continue
+            key = r.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(r)
+        return unique
 
     # --------------------------------------------------
     # KEYWORD MATCH
@@ -49,6 +153,9 @@ class NotificationService:
             select(User).where(User.is_active == True)
         )
         users = result.scalars().all()
+        settings_map = await NotificationService._get_user_settings_map(
+            db, [u.id for u in users]
+        )
 
         email_service = EmailNotificationService()
         desktop_service = DesktopNotificationService()
@@ -85,18 +192,27 @@ class NotificationService:
             await db.flush()
 
             # EMAIL
-            if settings.ENABLE_EMAIL_NOTIFICATIONS:
+            recipients = NotificationService._build_recipient_list(
+                user, settings_map.get(user.id)
+            )
+
+            if settings.ENABLE_EMAIL_NOTIFICATIONS and recipients:
                 try:
                     await email_service.send_new_tender_notification(
                         tender=tender,
                         matched_keywords=matched_keywords,
-                        recipients=[user.email]
+                        recipients=recipients
                     )
                     notification.email_sent = True
 
                 except Exception as e:
                     logger.error(f"Email failed: {e}")
                     notification.error_message = str(e)
+                    await NotificationService._notify_admins_of_error(
+                        db,
+                        title="Keyword notification email failed",
+                        message=f"Tender {tender.reference_id}: {e}"
+                    )
 
             # DESKTOP
             if settings.ENABLE_DESKTOP_NOTIFICATIONS:
@@ -109,6 +225,12 @@ class NotificationService:
 
                 except Exception as e:
                     logger.error(f"Desktop failed: {e}")
+                    notification.error_message = str(e)
+                    await NotificationService._notify_admins_of_error(
+                        db,
+                        title="Keyword notification desktop failed",
+                        message=f"Tender {tender.reference_id}: {e}"
+                    )
 
             # FINAL STATUS
             notification.is_sent = (
@@ -117,6 +239,16 @@ class NotificationService:
 
             if notification.is_sent:
                 notification.sent_at = datetime.utcnow()
+                # Push live to connected clients (websocket)
+                await push_notification({
+                    "id": notification.id,
+                    "title": notification.title,
+                    "message": notification.message,
+                    "module": notification.module,
+                    "type": notification.type.value if hasattr(notification.type, "value") else str(notification.type),
+                    "tender_id": notification.tender_id,
+                    "created_at": notification.created_at.isoformat() + "Z" if notification.created_at else datetime.utcnow().isoformat() + "Z"
+                })
 
         await db.flush()
 
@@ -137,8 +269,17 @@ class NotificationService:
             select(User).where(User.is_active == True)
         )
         users = result.scalars().all()
+        settings_map = await NotificationService._get_user_settings_map(
+            db,
+            [u.id for u in users]
+        )
+
+        email_service = EmailNotificationService()
+        desktop_service = DesktopNotificationService()
 
         for user in users:
+
+            user_settings = settings_map.get(user.id)
 
             notification = Notification(
                 user_id=user.id,
@@ -148,7 +289,7 @@ class NotificationService:
                 module=MODULES["DASHBOARD"],
 
                 type=NotificationType.NEW_TENDER,
-                channel=NotificationChannel.EMAIL,
+                channel=NotificationChannel.BOTH,
 
                 title=f"New Tender Published: {tender.title[:50]}...",
                 message=(
@@ -159,6 +300,61 @@ class NotificationService:
             )
 
             db.add(notification)
+
+            await db.flush()
+
+            # EMAIL
+            recipients = NotificationService._build_recipient_list(user, user_settings)
+
+            if settings.ENABLE_EMAIL_NOTIFICATIONS and recipients:
+                try:
+                    await email_service.send_new_tender_notification(
+                        tender=tender,
+                        matched_keywords=[],
+                        recipients=recipients
+                    )
+                    notification.email_sent = True
+                except Exception as e:
+                    logger.error(f"New tender email failed: {e}")
+                    notification.error_message = str(e)
+                    await NotificationService._notify_admins_of_error(
+                        db,
+                        title="New tender email failed",
+                        message=f"Tender {tender.reference_id}: {e}"
+                    )
+
+            # DESKTOP
+            if settings.ENABLE_DESKTOP_NOTIFICATIONS:
+                try:
+                    desktop_service.send_notification(
+                        title=notification.title,
+                        message=notification.message
+                    )
+                    notification.desktop_sent = True
+                except Exception as e:
+                    logger.error(f"New tender desktop notification failed: {e}")
+                    notification.error_message = str(e)
+                    await NotificationService._notify_admins_of_error(
+                        db,
+                        title="New tender desktop failed",
+                        message=f"Tender {tender.reference_id}: {e}"
+                    )
+
+            notification.is_sent = (
+                notification.email_sent or notification.desktop_sent
+            )
+
+            if notification.is_sent:
+                notification.sent_at = datetime.utcnow()
+                await push_notification({
+                    "id": notification.id,
+                    "title": notification.title,
+                    "message": notification.message,
+                    "module": notification.module,
+                    "type": notification.type.value if hasattr(notification.type, "value") else str(notification.type),
+                    "tender_id": notification.tender_id,
+                    "created_at": notification.created_at.isoformat() + "Z" if notification.created_at else datetime.utcnow().isoformat() + "Z"
+                })
 
         await db.flush()
 
@@ -176,6 +372,9 @@ class NotificationService:
             select(User).where(User.is_active == True)
         )
         users = result.scalars().all()
+        settings_map = await NotificationService._get_user_settings_map(
+            db, [u.id for u in users]
+        )
 
         email_service = EmailNotificationService()
         desktop_service = DesktopNotificationService()
@@ -205,11 +404,14 @@ class NotificationService:
             if days_remaining <= 7:
 
                 # EMAIL
-                if settings.ENABLE_EMAIL_NOTIFICATIONS:
+                recipients = NotificationService._build_recipient_list(
+                    user, settings_map.get(user.id)
+                )
+                if settings.ENABLE_EMAIL_NOTIFICATIONS and recipients:
                     try:
                         await email_service.send_deadline_alert(
                             tender=tender,
-                            recipients=[user.email],
+                            recipients=recipients,
                             days_remaining=days_remaining
                         )
                         notification.email_sent = True
@@ -217,6 +419,11 @@ class NotificationService:
                     except Exception as e:
                         logger.error(f"Deadline email failed: {e}")
                         notification.error_message = str(e)
+                        await NotificationService._notify_admins_of_error(
+                            db,
+                            title="Deadline email failed",
+                            message=f"Tender {tender.reference_id}: {e}"
+                        )
 
                 # DESKTOP
                 if settings.ENABLE_DESKTOP_NOTIFICATIONS:
@@ -229,13 +436,28 @@ class NotificationService:
 
                     except Exception as e:
                         logger.error(f"Desktop deadline failed: {e}")
+                        notification.error_message = str(e)
+                        await NotificationService._notify_admins_of_error(
+                            db,
+                            title="Deadline desktop failed",
+                            message=f"Tender {tender.reference_id}: {e}"
+                        )
 
                 notification.is_sent = (
                     notification.email_sent or notification.desktop_sent
                 )
 
-                if notification.is_sent:
-                    notification.sent_at = datetime.utcnow()
+            if notification.is_sent:
+                notification.sent_at = datetime.utcnow()
+                await push_notification({
+                    "id": notification.id,
+                    "title": notification.title,
+                    "message": notification.message,
+                    "module": notification.module,
+                    "type": notification.type.value if hasattr(notification.type, "value") else str(notification.type),
+                    "tender_id": notification.tender_id,
+                    "created_at": notification.created_at.isoformat() + "Z" if notification.created_at else datetime.utcnow().isoformat() + "Z"
+                })
 
         await db.flush()
 

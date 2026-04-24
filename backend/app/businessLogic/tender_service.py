@@ -53,8 +53,7 @@ class TenderService:
         # ---- STEP 3: MATCH KEYWORDS ----
         matched_keywords = await KeywordService.match_keywords(
             db,
-            tender.title,
-            tender.description
+            tender
         )
 
         if matched_keywords:
@@ -67,6 +66,9 @@ class TenderService:
         await NotificationService.send_keyword_match_notification(
             db, tender, matched_keywords
         )
+
+        # Notify all users about the new tender (desktop/email controlled via settings)
+        await NotificationService.send_new_tender_notification(db, tender)
 
         await db.commit()
         await db.refresh(tender)

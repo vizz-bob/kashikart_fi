@@ -9,18 +9,24 @@ logger = setup_logger("email_sender")
 
 
 def _send_email(to_email: str, subject: str, html: str, text: str):
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL}>"
-    msg["To"] = to_email
+    try:
+        logger.info(f"Sending email to {to_email}, subject: {subject[:50]}...")
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL}>"
+        msg["To"] = to_email
 
-    msg.attach(MIMEText(text, "plain"))
-    msg.attach(MIMEText(html, "html"))
+        msg.attach(MIMEText(text, "plain"))
+        msg.attach(MIMEText(html, "html"))
 
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-        server.starttls()
-        server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-        server.send_message(msg)
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+            server.starttls()
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.send_message(msg)
+        logger.info(f"Email sent successfully to {to_email}")
+    except Exception as e:
+        logger.error(f"Failed to send email to {to_email}: {str(e)}", exc_info=True)
+        raise
 
 
 # ---------------- AUTH EMAILS ----------------

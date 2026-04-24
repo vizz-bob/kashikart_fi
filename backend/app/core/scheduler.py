@@ -208,11 +208,32 @@ def excel_job():
         JOB_RUNNING = False
 
 
-# Register job
+# Register jobs
 scheduler.add_job(
     excel_job,
-    trigger=IntervalTrigger(minutes=1),
+    IntervalTrigger(minutes=1),
     id="excel_auto_fetch",
+    replace_existing=True
+)
+
+# Auto tender sync every 20 mins
+def tender_sync_job():
+    from app.businessLogic.source_service import fetch_from_all_sources
+    from app.businessLogic.notification_service import NotificationService
+    try:
+        result = fetch_from_all_sources()
+        logger.info(f"Auto sync result: {result}")
+        NotificationService().send_system_notification(
+            title="Auto Sync Complete",
+            message=f"Synced {result.get('total_new_tenders', 0)} new tenders from {result.get('successful', 0)} sources"
+        )
+    except Exception as e:
+        logger.error(f"Auto tender sync error: {e}")
+
+scheduler.add_job(
+    tender_sync_job,
+    IntervalTrigger(minutes=20),
+    id="auto_tender_sync",
     replace_existing=True
 )
 

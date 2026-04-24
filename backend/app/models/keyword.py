@@ -4,7 +4,6 @@ from sqlalchemy import (
     String,
     Boolean,
     DateTime,
-    Enum,
     ForeignKey
 )
 from sqlalchemy.orm import relationship
@@ -16,12 +15,6 @@ import enum
 # ---------------------------
 # ENUMS
 # ---------------------------
-
-class KeywordPriority(str, enum.Enum):
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-
 
 class KeywordCategory(str, enum.Enum):
     """Predefined categories for UI dropdowns"""
@@ -51,14 +44,8 @@ class Keyword(Base):
         nullable=False
     )
 
-    priority = Column(
-        Enum(
-            KeywordPriority,
-            name="keywordpriority"
-        ),
-        default=KeywordPriority.MEDIUM,
-        index=True
-    )
+    # Priority p1 (lowest) ... p11 (highest) stored as string
+    priority = Column(String(4), default="p5", index=True)
 
     # Matching behavior
     is_case_sensitive = Column(Boolean, default=False)

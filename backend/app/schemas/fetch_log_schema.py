@@ -5,10 +5,12 @@ from enum import Enum
 
 
 class FetchStatus(str, Enum):
-    SUCCESS = "success"
-    WARNING = "warning"
-    ERROR = "error"
-    INFO = "info"
+    RUNNING = "RUNNING"
+    SUCCESS = "SUCCESS"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    FAILED = "FAILED"
+    INFO = "INFO"
 
 
 class FetchLogBase(BaseModel):

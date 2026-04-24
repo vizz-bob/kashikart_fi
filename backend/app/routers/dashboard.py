@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, and_, desc, select
 from sqlalchemy.orm import joinedload
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.core.database import get_db
 from app.models.tender import Tender
@@ -39,20 +39,21 @@ def to_ist(utc_dt: datetime) -> str:
 # Semaphore to limit total concurrent scrapers system-wide
 scraper_semaphore = asyncio.Semaphore(5)
 
-async def run_sync_task(source_ids: list):
+def run_sync_task(source_ids):
     """Background task to sync sources with concurrency control"""
-    async def fetch_with_semaphore(sid):
-        async with scraper_semaphore:
-            from app.core.database import AsyncSessionLocal
-            async with AsyncSessionLocal() as local_db:
-                local_fetch_service = FetchService(local_db)
-                try:
-                    await local_fetch_service.fetch_from_source(sid)
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).error(f"Error background fetching source {sid}: {e}")
+    async def inner():
+        for sid in source_ids:
+            async with scraper_semaphore:
+                from app.core.database import AsyncSessionLocal
+                async with AsyncSessionLocal() as local_db:
+                    local_fetch_service = FetchService(local_db)
+                    try:
+                        await local_fetch_service.fetch_from_source(sid)
+                    except Exception as e:
+                        import logging
+                        logging.getLogger(__name__).error(f"Error background fetching source {sid}: {e}")
 
-    await asyncio.gather(*[fetch_with_semaphore(sid) for sid in source_ids])
+    asyncio.run(inner())
 
 @router.post("/sync")
 async def sync_dashboard(
@@ -66,7 +67,7 @@ async def sync_dashboard(
     source_ids = result.scalars().all()
     
     # Start sync in background
-    background_tasks.add_task(run_sync_task, source_ids, current_user.id)
+    background_tasks.add_task(run_sync_task, source_ids)
     
     # Return immediately with current data
     stats = await get_dashboard_stats(db, current_user)
@@ -76,6 +77,16 @@ async def sync_dashboard(
     last_log_query = select(FetchLog).where(FetchLog.status == FetchStatus.SUCCESS).order_by(desc(FetchLog.created_at)).limit(1)
     last_log_res = await db.execute(last_log_query)
     last_log = last_log_res.scalar_one_or_none()
+
+    # Next sync times
+    from app.core.scheduler import scheduler
+    excel_job = scheduler.get_job("excel_auto_fetch")
+    tender_job = scheduler.get_job("auto_tender_sync")
+
+    now = datetime.now(timezone.utc)
+    next_excel = (excel_job.next_run_time - now).total_seconds() / 60 if excel_job and excel_job.next_run_time else None
+    next_tender_seconds = int((tender_job.next_run_time - now).total_seconds()) if tender_job and tender_job.next_run_time else None
+    next_tender = (next_tender_seconds / 60) if next_tender_seconds is not None else None
 
     notif_query = select(Notification).where(Notification.user_id == current_user.id).order_by(desc(Notification.created_at)).limit(5)
     notif_res = await db.execute(notif_query)
@@ -91,7 +102,10 @@ async def sync_dashboard(
         "topKeywords": stats.get("top_keywords", []),
         "sources": sources_status,
         "lastSyncAt": to_ist(last_log.created_at) if last_log else "Never",
-        "nextSyncIn": "Syncing...",
+        "nextExcelSync": f"{next_excel:.1f} min" if next_excel else "N/A",
+        "nextTenderSync": f"{next_tender:.1f} min" if next_tender else "N/A",
+        "nextTenderSyncSeconds": next_tender_seconds if next_tender_seconds is not None else None,
+        "systemStatus": "System is active and monitoring",
         "stats": {
             "newTendersToday": stats.get("new_tenders_today", 0),
             "keywordMatches": stats.get("keyword_matches_today", 0),
@@ -175,6 +189,13 @@ async def get_dashboard_stats(
         total_notifications = await db.scalar(q_total_notifications) or 0
         top_keywords_res = await db.execute(q_top_keywords)
 
+        # Scheduler ETA
+        from app.core.scheduler import scheduler
+        tender_job = scheduler.get_job("auto_tender_sync")
+        next_sync_seconds = None
+        if tender_job and tender_job.next_run_time:
+            next_sync_seconds = int((tender_job.next_run_time - datetime.now(timezone.utc)).total_seconds())
+
         new_change = 0.0
         if new_previous > 0:
             new_change = ((new_recent - new_previous) / new_previous) * 100
@@ -200,7 +221,8 @@ async def get_dashboard_stats(
             "active_sources": int(active_sources),
             "total_sources": int(total_sources),
             "alerts_today": int(total_notifications),
-            "top_keywords": top_keywords
+            "top_keywords": top_keywords,
+            "next_tender_sync_in_seconds": next_sync_seconds
         }
     except Exception as e:
         import logging

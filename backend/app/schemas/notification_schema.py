@@ -13,7 +13,7 @@ from enum import Enum
 class NotificationType(str, Enum):
     NEW_TENDER = "new_tender"
     KEYWORD_MATCH = "keyword_match"
-    DEADLINE_APPROACHING = "deadline_approACHING"
+    DEADLINE_APPROACHING = "deadline_approaching"
     SYSTEM_ERROR = "system_error"
 
 
@@ -94,17 +94,17 @@ class NotificationSettings(BaseModel):
 
 
 class NotificationSettingsUpdate(BaseModel):
+    # All fields optional for PATCH; defaults prevent 422 on partial updates
+    enable_desktop: Optional[bool] = None
+    enable_email: Optional[bool] = None
 
-    enable_desktop: Optional[bool]
-    enable_email: Optional[bool]
+    email_recipients: Optional[List[str]] = None
 
-    email_recipients: Optional[List[EmailStr]]
+    new_tender_published: Optional[bool] = None
+    keyword_match_found: Optional[bool] = None
+    deadline_approaching: Optional[bool] = None
+    system_errors: Optional[bool] = None
 
-    new_tender_published: Optional[bool]
-    keyword_match_found: Optional[bool]
-    deadline_approaching: Optional[bool]
-    system_errors: Optional[bool]
-
-    enable_silent_hours: Optional[bool]
-    silent_start_time: Optional[time]
-    silent_end_time: Optional[time]
+    enable_silent_hours: Optional[bool] = None
+    silent_start_time: Optional[time] = None
+    silent_end_time: Optional[time] = None

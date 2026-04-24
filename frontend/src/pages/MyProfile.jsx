@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Calendar, Mail, Save, User, Lock, Upload, X } from "lucide-react";
 import { getErrorMessage, requestJson, requestWithRetry } from "../utils/api";
 
-const USE_MOCK_PROFILE = true;
 const PROFILE_ENDPOINTS = {
   fetch: "/api/user/profile",
   update: "/api/user/profile",
@@ -40,7 +39,6 @@ export default function ProfilePage() {
   const [hasCustomPhoto, setHasCustomPhoto] = useState(false);
   const [photoPreview, setPhotoPreview] = useState(null);
 
-  // Simulating API fetch on component mount
   useEffect(() => {
     fetchUserData();
   }, []);
@@ -71,44 +69,48 @@ export default function ProfilePage() {
     }
   }, []);
 
-  // This function would call your backend API
   const fetchUserData = async () => {
     setLoading(true);
     setError(null);
     try {
-      const mockData = {
-        id: 1,
-        fullName: "Vr6295836",
-        email: "vr6295836@gmail.com",
-        phone: "",
-        avatar: "V",
-        role: "Admin",
-        joinedDate: "January 2024",
-        emailVerified: true,
-      };
+      const data = await requestWithRetry(() =>
+        requestJson(PROFILE_ENDPOINTS.fetch)
+      );
 
-      const data = USE_MOCK_PROFILE
-        ? mockData
-        : await requestWithRetry(() => requestJson(PROFILE_ENDPOINTS.fetch));
+      if (!data || typeof data !== "object") {
+        throw new Error("Invalid profile response");
+      }
 
-      const storedName = localStorage.getItem("profileName");
-      const storedEmail = localStorage.getItem("profileEmail");
-      const finalName = storedName || mockData.fullName;
-      const finalEmail = storedEmail || mockData.email;
+      const fullName = data.fullName || data.full_name || "";
+      const email = data.email || "";
+      const phone = data.phone || "";
+      const avatar = fullName?.charAt(0)?.toUpperCase() || "U";
+      const role = data.role || data.title || "";
+      const joinedDate = data.joinedDate || data.joined_date || "";
+      const emailVerified = Boolean(
+        data.emailVerified ?? data.email_verified ?? false
+      );
 
       setUserData({
-        ...mockData,
-        fullName: finalName,
-        email: finalEmail,
-        avatar: finalName?.charAt(0)?.toUpperCase() || "U",
+        id: data.id ?? null,
+        fullName,
+        email,
+        phone,
+        avatar,
+        role,
+        joinedDate,
+        emailVerified,
       });
+
       setPersonalInfo({
-        fullName: finalName,
-        email: finalEmail,
-        phone: mockData.phone,
+        fullName,
+        email,
+        phone,
       });
-      localStorage.setItem("profileName", finalName || "");
-      localStorage.setItem("profileEmail", finalEmail || "");
+
+      // Persist minimal info locally so avatar/name survive reloads.
+      localStorage.setItem("profileName", fullName || "");
+      localStorage.setItem("profileEmail", email || "");
       window.dispatchEvent(new Event("profileInfoUpdated"));
     } catch (error) {
       console.error("Error fetching user data:", error);
@@ -144,15 +146,13 @@ export default function ProfilePage() {
     setLoading(true);
     setError(null);
     try {
-      if (!USE_MOCK_PROFILE) {
-        await requestWithRetry(() =>
-          requestJson(PROFILE_ENDPOINTS.update, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(personalInfo),
-          })
-        );
-      }
+      await requestWithRetry(() =>
+        requestJson(PROFILE_ENDPOINTS.update, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(personalInfo),
+        })
+      );
 
       // Update local state after successful save
       setUserData({
@@ -187,18 +187,16 @@ export default function ProfilePage() {
     setLoading(true);
     setError(null);
     try {
-      if (!USE_MOCK_PROFILE) {
-        await requestWithRetry(() =>
-          requestJson(PROFILE_ENDPOINTS.password, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              currentPassword: securityInfo.currentPassword,
-              newPassword: securityInfo.newPassword,
-            }),
-          })
-        );
-      }
+      await requestWithRetry(() =>
+        requestJson(PROFILE_ENDPOINTS.password, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            currentPassword: securityInfo.currentPassword,
+            newPassword: securityInfo.newPassword,
+          }),
+        })
+      );
 
       // Clear password fields after successful update
       setSecurityInfo({

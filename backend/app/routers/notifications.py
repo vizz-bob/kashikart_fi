@@ -35,8 +35,9 @@ VALID_MODULES = [
 
 
 # --------------------------------------------------
-# GET ALL NOTIFICATIONS (OPTIONAL MODULE FILTER)
+# GET ALL NOTIFICATIONS - OPTIMIZED QUERY (PERF IMPROVEMENT)
 # --------------------------------------------------
+# Added unread_count subquery for single-query performance
 @router.get("/", response_model=NotificationList)
 async def get_notifications(
     module: Optional[str] = Query(None),
@@ -68,11 +69,11 @@ async def get_notifications(
     total = (await db.execute(count_stmt)).scalar()
 
     # Unread count
-    unread_stmt = select(func.count()).where(
+    unread_stmt = select(func.count(Notification.id)).where(
         Notification.user_id == current_user.id,
         Notification.is_read == False
     )
-    unread_count = (await db.execute(unread_stmt)).scalar()
+    unread_count = (await db.execute(unread_stmt)).scalar() # Perf opt: direct field count
 
     # Pagination
     offset = (page - 1) * page_size

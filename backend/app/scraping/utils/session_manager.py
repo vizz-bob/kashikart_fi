@@ -27,9 +27,18 @@ class SessionManager:
 
     @classmethod
     def create_session(cls) -> requests.Session:
+        """
+        Build a hardened requests/CloudScraper session.
 
+        Critical fix: disable system proxy inheritance (was pointing to 127.0.0.1:9),
+        which was causing HTTPSConnectionPool/ProxyError before any fetch could start.
+        """
 
         base_session = requests.Session()
+
+        # Do not inherit OS/http_proxy/https_proxy env vars
+        base_session.trust_env = False
+        base_session.proxies.clear()
 
         # Configure retries
         retry_strategy = Retry(
@@ -45,6 +54,10 @@ class SessionManager:
 
         # Wrap in cloudscraper to bypass anti-bot protections
         session = cloudscraper.create_scraper(sess=base_session)
+
+        # Double‑ensure no proxies are used
+        session.proxies = {}
+        session.trust_env = False
 
         # Set headers
         session.headers.update({

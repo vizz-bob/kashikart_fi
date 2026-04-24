@@ -19,22 +19,23 @@ import {
 } from "lucide-react";
 import { EmptyState } from "../components/States";
 import { getErrorMessage, requestJson, requestWithRetry } from "../utils/api";
+import { useSources } from "../contexts/SourcesContext";
 
-const USE_MOCK_SOURCES = false; // Set to false to use real backend data
-const USE_MOCK_NOTIFICATIONS = false; // Set to false to use real backend data
+const USE_MOCK_SOURCES = false;
+const USE_MOCK_NOTIFICATIONS = false;
+const USE_MOCK_KEYWORDS = false;
 const SOURCE_ENDPOINTS = {
   list: (size = 200) => `/api/sources/?size=${size}`,
   refresh: (id) => `/api/sources/${id}/refresh`,
 };
 const NOTIFICATION_ENDPOINTS = {
-  list: "/api/notifications/", // TODO BACKEND: yahi endpoint use hoga
+  list: "/api/notifications/",
+};
+const KEYWORD_ENDPOINTS = {
+  active: "/api/keywords/active",
 };
 
-const INITIAL_NOTIFICATIONS = [
-  { id: 1, message: "Source refresh failed: EPA Portal", isRead: false },
-  { id: 2, message: "New source added: NASA Procurement", isRead: false },
-  { id: 3, message: "Source disabled: EPA Portal", isRead: true },
-];
+const INITIAL_NOTIFICATIONS = [];
 
 const getStatusColor = (status) => {
   const s = String(status).toLowerCase();
@@ -104,7 +105,14 @@ const SourceRow = memo(function SourceRow({
       </td>
       <td className="px-6 py-4">
         <div className="flex items-center gap-3">
-          {source.status !== "Disabled" && (
+{(['error', 'warning'].includes(source.status.toLowerCase())) ? (
+            <div className="tooltip-group relative inline-flex items-center cursor-not-allowed opacity-50">
+              <div className="w-11 h-6 bg-gray-200 rounded-full pointer-events-none"></div>
+              <div className="absolute -top-8 left-1/2 transform -translate-x-1/2 px-2 py-1 bg-red-100 text-red-800 text-xs rounded whitespace-nowrap">
+                Issues detected. Fix first
+              </div>
+            </div>
+          ) : (
             <label className="relative inline-flex items-center cursor-pointer">
               <input
                 type="checkbox"
@@ -136,106 +144,18 @@ const SourceRow = memo(function SourceRow({
 });
 
 export default function Sources() {
-  const [sources, setSources] = useState(USE_MOCK_SOURCES ? [
-    {
-      id: 1,
-      name: "SAM.gov",
-      url: "https://sam.gov",
-      login: "Public",
-      status: "Active",
-      lastFetch: "2026-01-01 08:30",
-      tenders: 1247,
-      isPublic: true,
-      isEnabled: true,
-    },
-    {
-      id: 2,
-      name: "DOT Portal",
-      url: "https://dot.gov/contracts",
-      login: "Required",
-      status: "Active",
-      lastFetch: "2026-01-01 08:25",
-      tenders: 342,
-      isPublic: false,
-      isEnabled: true,
-    },
-    {
-      id: 3,
-      name: "VA Procurement",
-      url: "https://va.gov/procurement",
-      login: "Required",
-      status: "Active",
-      lastFetch: "2026-01-01 08:20",
-      tenders: 189,
-      isPublic: false,
-      isEnabled: true,
-    },
-    {
-      id: 4,
-      name: "DHS Contracts",
-      url: "https://dhs.gov/contracts",
-      login: "Required",
-      status: "Active",
-      lastFetch: "2026-01-01 08:15",
-      tenders: 156,
-      isPublic: false,
-      isEnabled: true,
-    },
-    {
-      id: 5,
-      name: "EPA Portal",
-      url: "https://epa.gov/contracts",
-      login: "Public",
-      status: "Error",
-      lastFetch: "2025-12-31 22:00",
-      tenders: 98,
-      isPublic: true,
-      isEnabled: false,
-    },
-    {
-      id: 6,
-      name: "DOJ Procurement",
-      url: "https://doj.gov/procurement",
-      login: "Required",
-      status: "Active",
-      lastFetch: "2026-01-01 08:10",
-      tenders: 134,
-      isPublic: false,
-      isEnabled: true,
-    },
-    {
-      id: 7,
-      name: "DoD Contracts",
-      url: "https://defense.gov/contracts",
-      login: "Required",
-      status: "Active",
-      lastFetch: "2026-01-01 08:05",
-      tenders: 567,
-      isPublic: false,
-      isEnabled: true,
-    },
-    {
-      id: 8,
-      name: "NASA Procurement",
-      url: "https://nasa.gov/procurement",
-      login: "Public",
-      status: "Disabled",
-      lastFetch: "2025-12-20 14:00",
-      tenders: 45,
-      isPublic: true,
-      isEnabled: false,
-    },
-  ] : []);
+  const { sources, toggleSource, fetchSources, loading: sourcesLoading, error: sourcesError } = useSources();
 
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingSource, setEditingSource] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showRefreshToast, setShowRefreshToast] = useState(false);
   const [refreshingSource, setRefreshingSource] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [totalSources, setTotalSources] = useState(0);
+  const [keywords, setKeywords] = useState([]);
+  const [keywordFilter, setKeywordFilter] = useState("ALL");
   const [stats, setStats] = useState({ active: 0, disabled: 0, errors: 0 });
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
@@ -249,58 +169,28 @@ export default function Sources() {
     selectorConfig: "",
   });
 
-  const fetchSources = useCallback(async () => {
-    if (USE_MOCK_SOURCES) return; // TODO BACKEND: mock delete karke API call enable hoga
+
+
+
+
+  // Active keywords for filtering / suggestions
+  const fetchKeywords = useCallback(async () => {
+    if (USE_MOCK_KEYWORDS) return;
     try {
-      setLoading(true);
-      setError(null);
-
       const data = await requestWithRetry(() =>
-        requestJson(SOURCE_ENDPOINTS.list())
+        requestJson(KEYWORD_ENDPOINTS.active)
       );
-
-      const sourceItems = Array.isArray(data) ? data : data?.items;
-
-      if (!Array.isArray(sourceItems)) {
-        throw new Error("Invalid sources format from server");
+      if (Array.isArray(data)) {
+        setKeywords(data);
       }
-
-      const normalizedSources = sourceItems.map((source) => {
-        const statusValue = String(source?.status || "").toLowerCase();
-        const normalizedStatus =
-          statusValue === "active"
-            ? "Active"
-            : statusValue === "disabled"
-              ? "Disabled"
-              : statusValue === "error"
-                ? "Error"
-                : (source?.status || "Unknown");
-
-        return {
-          ...source,
-          status: normalizedStatus,
-          isEnabled: Boolean(source?.is_active),
-        };
-      });
-
-      setSources(normalizedSources);
-      setTotalSources(data?.total || normalizedSources.length);
-      setStats({
-        active: data?.active || 0,
-        disabled: data?.disabled || 0,
-        errors: data?.errors || 0
-      });
     } catch (err) {
-      console.error(err);
-      setError(getErrorMessage(err, "Failed to load sources"));
-    } finally {
-      setLoading(false);
+      console.error("Failed to fetch keywords:", err);
     }
   }, []);
 
   useEffect(() => {
-    fetchSources();
-  }, [fetchSources]);
+    fetchKeywords();
+  }, [fetchKeywords]);
 
   const fetchNotifications = useCallback(async () => {
     if (USE_MOCK_NOTIFICATIONS) return; // TODO BACKEND: mock hata ke API se data aayega
@@ -373,7 +263,7 @@ export default function Sources() {
           url: formData.url,
           scraper_type: formData.scraperType || 'html',
           selector_config: formData.selectorConfig ? JSON.parse(formData.selectorConfig) : {},
-          login_type: formData.loginType.toLowerCase() === 'public' ? 'public' : 'required',
+          login_type: formData.loginType.toLowerCase() === 'public' ? 'PUBLIC' : 'REQUIRED',
           is_active: true
         };
 
@@ -393,11 +283,11 @@ export default function Sources() {
         });
         
         // Refresh sources list immediately
-        fetchSources();
+        fetchSources?.();
         
         // Delayed refreshes to catch the background fetch result
-        setTimeout(() => fetchSources(), 2000);
-        setTimeout(() => fetchSources(), 5000);
+        setTimeout(() => fetchSources?.(), 2000);
+        setTimeout(() => fetchSources?.(), 5000);
 
       } catch (err) {
         console.error(err);
@@ -419,39 +309,9 @@ export default function Sources() {
     });
   }, []);
 
-  const handleToggle = useCallback(async (id) => {
-    const source = sources.find((s) => s.id === id);
-    if (!source) return;
-
-    const nextActiveState = !source.is_active;
-
-    try {
-      // Optimistic update
-      setSources((prev) =>
-        prev.map((s) =>
-          s.id === id
-            ? { ...s, is_active: nextActiveState, isEnabled: nextActiveState }
-            : s
-        )
-      );
-
-      // Backend persist
-      await requestJson(`/api/sources/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ is_active: nextActiveState })
-      });
-    } catch (err) {
-      console.error("Failed to toggle source:", err);
-      // Revert on failure
-      setSources((prev) =>
-        prev.map((s) =>
-          s.id === id
-            ? { ...s, is_active: !nextActiveState, isEnabled: !nextActiveState }
-            : s
-        )
-      );
-    }
-  }, [sources]);
+  const handleToggle = useCallback((id) => {
+    toggleSource(id);
+  }, [toggleSource]);
 
   const handleRefresh = useCallback(
     async (id) => {
@@ -485,7 +345,7 @@ export default function Sources() {
 
       // Refresh sources list from server to get updated tender counts
       setTimeout(() => {
-        fetchSources();
+        fetchSources?.();
       }, 1500);
 
       setTimeout(() => {
@@ -493,7 +353,7 @@ export default function Sources() {
       }, 3000);
 
       setTimeout(() => {
-        fetchSources();
+        fetchSources?.();
       }, 4000);
     },
     [sources, fetchSources]
@@ -528,7 +388,7 @@ export default function Sources() {
         const payload = {
           name: editingSource.name,
           url: editingSource.url,
-          login_type: editingSource.loginType?.toLowerCase() === 'public' ? 'public' : 'required',
+          login_type: editingSource.loginType?.toLowerCase() === 'public' ? 'PUBLIC' : 'REQUIRED',
           scraper_type: editingSource.scraperType || 'html',
           selector_config: editingSource.selectorConfig ? JSON.parse(editingSource.selectorConfig) : {},
         };
@@ -540,7 +400,7 @@ export default function Sources() {
 
         setIsEditModalOpen(false);
         setEditingSource(null);
-        fetchSources();
+        fetchSources?.();
       } catch (err) {
         console.error(err);
         setError(getErrorMessage(err, "Failed to update source"));
@@ -568,6 +428,9 @@ export default function Sources() {
     () => notifications.filter((n) => !n.isRead).length,
     [notifications]
   );
+
+  const isLoading = loading || sourcesLoading;
+  const displayError = error || sourcesError;
 
   const handleToggleNotifications = useCallback(() => {
     setShowNotifications((prev) => !prev);
@@ -597,12 +460,26 @@ export default function Sources() {
   );
   const filteredSources = useMemo(
     () =>
-      safeSources.filter(
-        (source) =>
+      safeSources.filter((source) => {
+        const matchesSearch =
           source.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          source.url.toLowerCase().includes(searchQuery.toLowerCase())
-      ),
-    [safeSources, searchQuery]
+          source.url.toLowerCase().includes(searchQuery.toLowerCase());
+
+        if (keywordFilter === "ALL") return matchesSearch;
+
+        const kw = keywordFilter.toLowerCase();
+        const sourceKeywords = Array.isArray(source.keywords)
+          ? source.keywords.map((k) => String(k).toLowerCase())
+          : [];
+
+        const keywordHit =
+          source.name.toLowerCase().includes(kw) ||
+          source.url.toLowerCase().includes(kw) ||
+          sourceKeywords.some((k) => k.includes(kw));
+
+        return matchesSearch && keywordHit;
+      }),
+    [safeSources, searchQuery, keywordFilter]
   );
 
   return (
@@ -697,15 +574,15 @@ export default function Sources() {
         </div>
       </div>
 
-      {loading && (
+      {isLoading && (
         <div className="mx-4 mt-4 text-sm text-gray-500 flex items-center gap-2 sm:mx-6">
           <span className="animate-spin h-4 w-4 border-2 border-gray-300 border-t-transparent rounded-full"></span>
           Loading sources...
         </div>
       )}
-      {error && (
+      {displayError && (
         <div className="mx-4 mt-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm sm:mx-6">
-          {error}
+          {displayError}
         </div>
       )}
 
@@ -713,46 +590,66 @@ export default function Sources() {
       <div className="p-4 max-w-[1400px] mx-auto sm:p-6">
         {/* Statistics Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div className="bg-white rounded-lg border border-gray-200 p-5">
+        <div className="bg-white rounded-lg border border-gray-200 p-5">
             <div className="text-sm text-gray-600 mb-1">Total Sources</div>
             <div className="text-3xl font-semibold text-gray-900">
-              {totalSources}
+              {sources.length}
             </div>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <div className="text-sm text-gray-600 mb-1">Active</div>
             <div className="text-3xl font-semibold text-green-600">
-              {stats.active}
+              {sources.filter(s => s.isEnabled).length}
             </div>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <div className="text-sm text-gray-600 mb-1">Disabled</div>
             <div className="text-3xl font-semibold text-gray-600">
-              {stats.disabled}
+              {sources.filter(s => !s.isEnabled).length}
             </div>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-5">
             <div className="text-sm text-gray-600 mb-1">Errors</div>
             <div className="text-3xl font-semibold text-red-600">
-              {stats.errors}
+              {sources.filter(s => s.status === 'ERROR').length}
             </div>
           </div>
         </div>
 
         {/* Search and Add Button */}
         <div className="flex flex-col gap-3 mb-6 md:flex-row md:items-center md:justify-between">
-          <div className="relative w-full md:w-[400px]">
-            <Search
-              className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
-              size={18}
-            />
-            <input
-              type="text"
-              placeholder="Search sources..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            />
+          <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+            <div className="relative w-full sm:w-[360px]">
+              <Search
+                className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                size={18}
+              />
+              <input
+                type="text"
+                placeholder="Search sources..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+
+            <div className="w-full sm:w-56">
+              <select
+                value={keywordFilter}
+                onChange={(e) => setKeywordFilter(e.target.value)}
+                className="w-full px-3 py-2.5 text-sm border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="ALL">All keywords</option>
+                {keywords.map((kw) => (
+                  <option key={kw} value={kw}>
+                    {kw}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-gray-400 mt-1">
+                Filter sources by admin keywords
+              </p>
+            </div>
           </div>
           <button
             onClick={() => setIsModalOpen(true)}

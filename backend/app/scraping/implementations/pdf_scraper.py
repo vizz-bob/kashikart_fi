@@ -1,4 +1,5 @@
 from typing import List, Dict, Optional
+import asyncio
 import requests
 import PyPDF2
 import re
@@ -14,27 +15,27 @@ logger = logging.getLogger(__name__)
 
 class PDFScraper(BaseScraper):
 
-
-    def scrape(self) -> List[Dict]:
-
+    async def scrape(self) -> List[Dict]:
+        """
+        Async-friendly PDF scrape. Uses asyncio.to_thread for the blocking work so
+        it can be awaited from async fetch pipelines.
+        """
 
         try:
-            # Download PDF
-            response = requests.get(
+            # Download PDF in thread to avoid blocking event loop
+            response = await asyncio.to_thread(
+                requests.get,
                 self.source.url,
                 timeout=self.timeout,
                 headers={'User-Agent': self.user_agent}
             )
             response.raise_for_status()
 
-            # Parse PDF
-            pdf_file = BytesIO(response.content)
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            def _read_pdf(content: bytes) -> str:
+                pdf_reader = PyPDF2.PdfReader(BytesIO(content))
+                return "".join(page.extract_text() or "" for page in pdf_reader.pages)
 
-            # Extract text from all pages
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text()
+            text = await asyncio.to_thread(_read_pdf, response.content)
 
             # Parse tenders from text
             tenders = self.parse_pdf_text(text)

@@ -6,15 +6,16 @@ import enum
 
 
 class SourceStatus(str, enum.Enum):
-    ACTIVE = "active"
-    DISABLED = "disabled"
-    ERROR = "error"
-    WARNING = "warning"
+    # Stored values are uppercase to match existing DB rows
+    ACTIVE = "ACTIVE"
+    DISABLED = "DISABLED"
+    ERROR = "ERROR"
+    WARNING = "WARNING"
 
 
 class LoginType(str, enum.Enum):
-    PUBLIC = "public"
-    REQUIRED = "required"
+    PUBLIC = "PUBLIC"
+    REQUIRED = "REQUIRED"
 
 
 class Source(Base):

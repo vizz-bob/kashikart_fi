@@ -25,9 +25,11 @@ import {
 } from "lucide-react";
 import { EmptyState } from "../components/States";
 import { getErrorMessage, requestJson, requestWithRetry } from "../utils/api";
-
-const USE_MOCK_TENDERS = false; // Set to false to use real backend data
-const USE_MOCK_NOTIFICATIONS = false; // Set to false to use real backend data
+import { useSources } from "../contexts/SourcesContext";
+import {
+  ensureNotificationPermission,
+  notifyNewTenders,
+} from "../utils/notifications";
 const TENDER_ENDPOINTS = {
   list: "/api/tenders/",
 };
@@ -35,15 +37,7 @@ const NOTIFICATION_ENDPOINTS = {
   list: "/api/notifications/", // TODO BACKEND: yahi endpoint use hoga
 };
 
-const INITIAL_NOTIFICATIONS = [
-  {
-    id: 1,
-    message: "New tender matched: IT Infrastructure Modernization",
-    isRead: false,
-  },
-  { id: 2, message: "Deadline approaching: DOT-HWY-2026-042", isRead: false },
-  { id: 3, message: "Tender saved: DHS-CYBER-2026-015", isRead: true },
-];
+const INITIAL_NOTIFICATIONS = [];
 
 function getTenderKeywordsText(tender) {
   if (!tender) return "";
@@ -96,34 +90,94 @@ const TenderListing = () => {
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState(INITIAL_NOTIFICATIONS);
   const notificationMenuRef = useRef(null);
+  const { activeSourceIds } = useSources();
 
-  const [tenders, setTenders] = useState([]);
+  const [tenders, setTenders] = useState([]); 
+  const tenderIdsRef = useRef(new Set());
+  const hasTenderSnapshotRef = useRef(false);
 
-  const fetchTenders = async () => {
-    if (USE_MOCK_TENDERS) return; // TODO BACKEND: mock delete karke API call enable hoga
+  const getTenderKey = useCallback((tender) => {
+    if (!tender) return null;
+    return tender.id ?? tender.reference_id ?? tender.code ?? null;
+  }, []);
+
+  const pushRealtimeNotifications = useCallback(
+    (newItems) => {
+      if (!newItems?.length) return;
+
+      // Update in-app notification tray (keep last 25 to avoid unbounded growth)
+      setNotifications((prev) => {
+        const mapped = newItems.map((t) => ({
+          id: `rt-${getTenderKey(t) || Date.now()}`,
+          message: `New tender fetched: ${t.title || t.reference_id || "Untitled"}`,
+          isRead: false,
+        }));
+        const next = [...prev, ...mapped];
+        return next.slice(-25);
+      });
+
+      // OS / desktop notification
+      notifyNewTenders(newItems);
+    },
+    [getTenderKey]
+  );
+
+  const fetchTenders = useCallback(async (reason = "manual") => {
     try {
-      setLoading(true);
+      if (reason === "initial") setLoading(true);
       setError(null);
 
       const data = await requestWithRetry(() =>
         requestJson(TENDER_ENDPOINTS.list)
       );
 
-      setTenders(data?.items || []);
+      const items = data?.items || [];
+      const ids = new Set(
+        items
+          .map((t) => getTenderKey(t))
+          .filter(Boolean)
+      );
+
+      let newlyArrived = [];
+      if (hasTenderSnapshotRef.current) {
+        newlyArrived = items.filter((t) => {
+          const key = getTenderKey(t);
+          return key && !tenderIdsRef.current.has(key);
+        });
+      }
+
+      tenderIdsRef.current = ids;
+      hasTenderSnapshotRef.current = true;
+
+      setTenders(items);
+
+      if (newlyArrived.length) {
+        pushRealtimeNotifications(newlyArrived);
+      }
     } catch (err) {
       console.error(err);
       setError(getErrorMessage(err, "Failed to load tenders"));
     } finally {
-      setLoading(false);
+      if (reason === "initial") {
+        setLoading(false);
+      }
     }
-  };
+  }, [getTenderKey, pushRealtimeNotifications]);
 
   useEffect(() => {
-    fetchTenders();
+    ensureNotificationPermission();
   }, []);
 
+  useEffect(() => {
+    fetchTenders("initial");
+  }, [fetchTenders]);
+
+  useEffect(() => {
+    const interval = setInterval(() => fetchTenders("realtime"), 20000);
+    return () => clearInterval(interval);
+  }, [fetchTenders]);
+
   const fetchNotifications = async () => {
-    if (USE_MOCK_NOTIFICATIONS) return; // TODO BACKEND: mock hata ke API se data aayega
     try {
       setError(null);
       const data = await requestWithRetry(() =>
@@ -159,6 +213,18 @@ const TenderListing = () => {
       });
     } catch (err) {
       console.error("Failed to update tender status:", err);
+    }
+  }, []);
+
+  const openTenderSource = useCallback((tender) => {
+    if (!tender) return;
+    const url =
+      tender.source_url ||
+      tender.url ||
+      tender.link ||
+      tender.source_link;
+    if (url && typeof window !== "undefined") {
+      window.open(url, "_blank", "noopener,noreferrer");
     }
   }, []);
 
@@ -244,11 +310,15 @@ const TenderListing = () => {
 
   const safeTenders = useMemo(
     () => (Array.isArray(tenders) ? tenders : []),
-    [tenders]
+    [tenders, activeSourceIds]
+  );
+  const activeTenders = useMemo(() => 
+    safeTenders.filter(t => !t.source_id || activeSourceIds.has(t.source_id)),
+    [safeTenders, activeSourceIds]
   );
   const filteredTenders = useMemo(
     () =>
-      safeTenders.filter((tender) => {
+      activeTenders.filter((tender) => {
         const title = (tender.title || "").toLowerCase();
         const code = (tender.reference_id || tender.code || "").toLowerCase();
         const agency = (tender.agency_name || tender.agency || "").toLowerCase();
@@ -270,7 +340,6 @@ const TenderListing = () => {
           selectedSource === "All Sources" || currentSource === selectedSource;
 
         let matchesDate = true;
-        // Simplified date check for now
         if (startDate && endDate && tender.deadline_date) {
             const tenderDeadline = new Date(tender.deadline_date);
             matchesDate = tenderDeadline >= startDate && tenderDeadline <= endDate;
@@ -280,7 +349,7 @@ const TenderListing = () => {
       }),
     [
       endDate,
-      safeTenders,
+      activeTenders,
       searchQuery,
       selectedSource,
       selectedStatus,
@@ -901,6 +970,7 @@ const TenderListing = () => {
                               if (tender.status?.toLowerCase() === 'new') {
                                 updateTenderStatus(tender.id, 'viewed');
                               }
+                              openTenderSource(tender);
                             }}
                           >
                             <Eye

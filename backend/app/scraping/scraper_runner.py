@@ -20,7 +20,7 @@ async def run_all_sources(db: Session):
     sources = (
         db.query(Source)
         .filter(Source.is_active == True)
-        .filter(Source.status == "active")
+        .filter(Source.status == "ACTIVE")
         .all()
     )
 
