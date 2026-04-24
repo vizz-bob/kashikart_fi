@@ -29,7 +29,7 @@ jobs:
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
-          echo "$EC2_SSH_KEY_B64" | base64 -d > ~/.ssh/id_rsa
+          printf '%s' "$EC2_SSH_KEY_B64" | base64 -di > ~/.ssh/id_rsa || echo "$EC2_SSH_KEY_B64" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -t ed25519,rsa -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
           ssh-keygen -y -f ~/.ssh/id_rsa > /dev/null && echo "SSH key valid"
