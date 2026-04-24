@@ -5,7 +5,6 @@
   "description": "KashiKart Tender Intelligence — Windows Desktop App",
   "main": "public/electron.js",
   "homepage": ".",
-  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
