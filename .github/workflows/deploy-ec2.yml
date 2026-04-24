@@ -45,52 +45,38 @@ jobs:
             --exclude='.env' \
             . ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:${{ env.DEPLOY_PATH }}/
 
-      # ── Write .env from secrets ───────────────────────────────
+      # ── Write .env from secrets (using printf to avoid YAML heredoc issues) ──
       - name: Write .env on EC2
         run: |
-          # Write .env locally on runner (no indentation issues), then scp to EC2
-          cat > /tmp/kashikart.env << 'ENVEOF'
-APP_NAME=KashiKart
-APP_VERSION=1.0.0
-ENVIRONMENT=production
-DATABASE_URL=postgresql+asyncpg://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@${{ secrets.DB_HOST }}:5432/${{ secrets.DB_NAME }}
-DATABASE_PASSWORD=${{ secrets.DB_PASSWORD }}
-SECRET_KEY=${{ secrets.SECRET_KEY }}
-ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}
-ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=30
-AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
-AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
-AWS_REGION=ap-south-1
-S3_BUCKET_NAME=kashikart-tender-data
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_TLS=true
-SMTP_USER=${{ secrets.SMTP_USER }}
-SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
-SMTP_FROM_EMAIL=${{ secrets.SMTP_FROM_EMAIL }}
-FRONTEND_URL=http://13.232.38.191
-BACKEND_URL=http://13.232.38.191:8000
-UPLOAD_DIR=${{ env.DEPLOY_PATH }}/backend/uploads
-BRANDING_UPLOAD_DIR=${{ env.DEPLOY_PATH }}/backend/branding
-ENVEOF
+          printf '%s\n' \
+            'APP_NAME=KashiKart' \
+            'APP_VERSION=1.0.0' \
+            'ENVIRONMENT=production' \
+            'DATABASE_URL=postgresql+asyncpg://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@${{ secrets.DB_HOST }}:5432/${{ secrets.DB_NAME }}' \
+            'DATABASE_PASSWORD=${{ secrets.DB_PASSWORD }}' \
+            'SECRET_KEY=${{ secrets.SECRET_KEY }}' \
+            'ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}' \
+            'ALGORITHM=HS256' \
+            'ACCESS_TOKEN_EXPIRE_MINUTES=30' \
+            'AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}' \
+            'AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}' \
+            'AWS_REGION=ap-south-1' \
+            'S3_BUCKET_NAME=kashikart-tender-data' \
+            'SMTP_HOST=smtp.gmail.com' \
+            'SMTP_PORT=587' \
+            'SMTP_TLS=true' \
+            'SMTP_USER=${{ secrets.SMTP_USER }}' \
+            'SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}' \
+            'SMTP_FROM_EMAIL=${{ secrets.SMTP_FROM_EMAIL }}' \
+            'FRONTEND_URL=http://13.232.38.191' \
+            'BACKEND_URL=http://13.232.38.191:8000' \
+            'UPLOAD_DIR=/home/ubuntu/kashikart/backend/uploads' \
+            'BRANDING_UPLOAD_DIR=/home/ubuntu/kashikart/backend/branding' \
+            > /tmp/kashikart.env
           scp -o StrictHostKeyChecking=no /tmp/kashikart.env ${{ env.EC2_USER }}@${{ env.EC2_HOST }}:${{ env.DEPLOY_PATH }}/backend/.env
           echo "✅ .env written to EC2"
 
       # ── Install deps & restart service ────────────────────────
-      - name: Setup Python environment
-        run: |
-          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
-            set -e
-            # Create virtual environment if not exists
-            if [ ! -d /home/ubuntu/venv ]; then
-              python3 -m venv /home/ubuntu/venv
-            fi
-            source /home/ubuntu/venv/bin/activate
-            pip install --upgrade pip -q
-            echo "✅ Virtual environment ready"
-          '
-
       - name: Install backend dependencies
         run: |
           ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
@@ -98,75 +84,40 @@ ENVEOF
             source /home/ubuntu/venv/bin/activate
             cd /home/ubuntu/kashikart/backend
             pip install -r requirements.txt -q
-            echo "✅ Dependencies installed"
-          '
-
-      - name: Create directories
-        run: |
-          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
             mkdir -p /home/ubuntu/kashikart/backend/uploads /home/ubuntu/kashikart/backend/branding
-            echo "✅ Directories created"
-          '
-
-      - name: Create systemd service
-        run: |
-          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
-            sudo tee /etc/systemd/system/kashikart-backend.service > /dev/null << EOF
-          [Unit]
-          Description=KashiKart Backend API
-          After=network.target
-
-          [Service]
-          Type=exec
-          User=ubuntu
-          Group=ubuntu
-          WorkingDirectory=/home/ubuntu/kashikart/backend
-          Environment=PATH=/home/ubuntu/venv/bin
-          ExecStart=/home/ubuntu/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level info
-          StandardOutput=journal
-          StandardError=journal
-          Restart=always
-          RestartSec=10
-
-          [Install]
-          WantedBy=multi-user.target
-          EOF
-            sudo systemctl daemon-reload
-            echo "✅ Systemd service created"
+            echo "Dependencies installed"
           '
 
       - name: Restart backend service
         run: |
           ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+            sudo systemctl daemon-reload
             sudo systemctl restart kashikart-backend
             sudo systemctl enable kashikart-backend
             sleep 5
             sudo systemctl status kashikart-backend --no-pager
-            echo "✅ Service restarted"
           '
 
       - name: Check service logs
         if: always()
         run: |
           ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
-            echo "=== Recent Service Logs ==="
-            sudo journalctl -u kashikart-backend -n 30 --no-pager || echo "No logs yet"
+            sudo journalctl -u kashikart-backend -n 30 --no-pager || true
           '
 
       # ── Health check ─────────────────────────────────────────
       - name: Health check
         run: |
-          echo "Starting health checks..."
           for i in $(seq 1 20); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://${{ env.EC2_HOST }}:8000/api/health || echo "000")
             echo "Attempt $i/20 — HTTP $STATUS"
             if [ "$STATUS" = "200" ]; then
-              echo "✅ Backend healthy"
+              echo "Backend healthy"
               exit 0
             fi
             sleep 10
           done
-          echo "❌ Health check failed after 20 attempts"
+          echo "Health check failed"
           exit 1
 
       - name: Summary
