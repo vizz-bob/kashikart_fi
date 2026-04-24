@@ -52,6 +52,7 @@
       "dist/**/*",
       "public/electron.js",
       "public/preload.js",
+      "public/config.json",
       "node_modules/**/*"
     ],
     "extraResources": [],
