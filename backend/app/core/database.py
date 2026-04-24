@@ -6,9 +6,9 @@ from app.core.config import settings
 # -------------------------
 # SSL CONTEXT FOR RDS
 # -------------------------
-ssl_context = ssl.create_default_context(
-    cafile="/home/ubuntu/KashiKartCiCd/backend/global-bundle.pem"
-)
+import os as _os
+_ssl_cert = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))), "global-bundle.pem")
+ssl_context = ssl.create_default_context(cafile=_ssl_cert)
 
 # -------------------------
 # ASYNC ENGINE
