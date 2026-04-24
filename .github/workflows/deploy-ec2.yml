@@ -22,23 +22,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── SSH setup (base64-encoded key) ───────────────────────
+      # ── SSH setup ────────────────────────────────────────────
       - name: Setup SSH
-        env:
-          EC2_SSH_KEY_B64: ${{ secrets.EC2_SSH_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          printf '%s' "$EC2_SSH_KEY_B64" | base64 -di > ~/.ssh/id_rsa || echo "$EC2_SSH_KEY_B64" | base64 -d > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -t ed25519,rsa -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
-          ssh-keygen -y -f ~/.ssh/id_rsa > /dev/null && echo "SSH key valid"
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Add EC2 to known hosts
+        run: ssh-keyscan -t ed25519,rsa -H ${{ env.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
       # ── Sync code ────────────────────────────────────────────
       - name: Sync code to EC2
         run: |
           rsync -az --delete \
-            -e "ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" \
+            -e "ssh -o StrictHostKeyChecking=no" \
             --exclude='.git' \
             --exclude='frontend/node_modules' \
             --exclude='frontend/dist' \
@@ -51,7 +48,7 @@ jobs:
       # ── Write .env from secrets ───────────────────────────────
       - name: Write .env on EC2
         run: |
-          ssh -i ~/.ssh/id_rsa ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "cat > ${{ env.DEPLOY_PATH }}/.env << 'ENVEOF'
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} "cat > ${{ env.DEPLOY_PATH }}/.env << 'ENVEOF'
           APP_NAME=KashiKart
           APP_VERSION=1.0.0
           ENVIRONMENT=production
@@ -80,7 +77,7 @@ jobs:
       # ── Install deps & restart service ────────────────────────
       - name: Restart backend
         run: |
-          ssh -i ~/.ssh/id_rsa ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
+          ssh ${{ env.EC2_USER }}@${{ env.EC2_HOST }} '
             set -e
             source /home/ubuntu/venv/bin/activate
             pip install -r /home/ubuntu/kashikart/backend/requirements.txt -q
