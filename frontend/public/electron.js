@@ -30,11 +30,17 @@ function createWindow() {
   });
 
   // Load the app
-  const startUrl = isDev 
-    ? 'http://localhost:5173' 
-    : `file://${path.join(__dirname, '../dist/index.html')}`;
-  
+  const startUrl = isDev
+    ? 'http://localhost:5173'
+    : `file://${path.join(__dirname, 'dist/index.html')}`;
+
   mainWindow.loadURL(startUrl);
+
+  // Handle load errors
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.error('Failed to load:', errorDescription);
+    console.error('URL:', validatedURL);
+  });
 
   // Show window when ready to prevent visual flash
   mainWindow.once('ready-to-show', () => {
