@@ -48,9 +48,16 @@ jobs:
 
       # Write the PEM key from GitHub Secret
       - name: Write SSH key
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
         run: |
-          echo "${{ secrets.EC2_SSH_KEY }}" > kashikart.pem
+          install -m 600 /dev/null kashikart.pem
+          echo "$EC2_SSH_KEY" > kashikart.pem
+          # Fix potential missing newline at end of key
+          echo "" >> kashikart.pem
           chmod 400 kashikart.pem
+          # Validate key is readable
+          ssh-keygen -y -f kashikart.pem > /dev/null && echo "SSH key valid" || echo "WARNING: key may have formatting issues"
 
       # Push code to EC2
       - name: Sync code to EC2
